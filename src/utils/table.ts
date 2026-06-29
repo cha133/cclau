@@ -13,8 +13,8 @@ import pc from "picocolors";
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
-export function visibleLength(s: string): string {
-  return s.replace(ANSI_RE, "");
+export function visibleLength(s: string): number {
+  return s.replace(ANSI_RE, "").length;
 }
 
 /**
@@ -22,7 +22,7 @@ export function visibleLength(s: string): string {
  * Strings already longer than width return as-is.
  */
 export function padEndStr(s: string, width: number): string {
-  const visible = visibleLength(s).length;
+  const visible = visibleLength(s);
   if (visible >= width) return s;
   return s + " ".repeat(width - visible);
 }
