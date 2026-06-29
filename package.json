@@ -1,12 +1,53 @@
 {
   "name": "cclau",
-  "module": "index.ts",
+  "version": "0.6.0",
+  "description": "Claude Code launcher with subscription manager and protocol conversion",
   "type": "module",
-  "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
+  "main": "./src/cli.ts",
+  "bin": {
+    "cclau": "bin/cclau.js"
   },
-  "peerDependencies": {
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "start": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run typecheck && bun test"
+  },
+  "keywords": [
+    "claude-code",
+    "launcher",
+    "anthropic",
+    "openai",
+    "bun"
+  ],
+  "license": "MIT",
+  "author": "cha133 <cha133@vip.qq.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cha133/cclau.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cha133/cclau/issues"
+  },
+  "homepage": "https://github.com/cha133/cclau#readme",
+  "dependencies": {
+    "@clack/prompts": "^1.0.0",
+    "commander": "^12.0.0",
+    "smol-toml": "^1.6.1",
+    "picocolors": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   }
 }
