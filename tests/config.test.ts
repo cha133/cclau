@@ -3,6 +3,8 @@
 // ----------------------------------------------------------------------------
 // 隔离：CCLAU_CONFIG 环境变量指向 mkdtempSync 临时目录
 // （与 cctra tests/rectify.test.ts 同模式）
+//
+// refactor 之后：单 Profile 概念，无 provider / alias。
 // ============================================================================
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test";
@@ -13,17 +15,14 @@ import { join } from "node:path";
 import {
   loadAppConfig,
   saveAppConfig,
-  upsertSubscription,
-  getSubscription,
-  listSubscriptions,
-  removeSubscription,
-  upsertProfile,
+  getDefaultProfile,
   getProfile,
   listProfiles,
+  listProfileNames,
   removeProfile,
+  upsertProfile,
 } from "../src/config.js";
-import type { Subscription, Profile } from "../src/types.js";
-import { buildDefaultAliases } from "../src/types.js";
+import type { Mode, Profile } from "../src/types.js";
 
 let tempDir: string;
 let tempConfigPath: string;
@@ -44,28 +43,17 @@ beforeEach(() => {
   rmSync(tempConfigPath, { force: true });
 });
 
-function makeSub(name: string, overrides: Partial<Subscription> = {}): Subscription {
+function makeProfile(name: string, overrides: Partial<Profile> = {}): Profile {
   return {
     name,
     endpoint: `https://example.invalid/${name}`,
     apiKey: `key-${name}`,
-    type: "anthropic",
     mode: "direct",
-    models: [{ id: "test-model", supports_1m: false }],
+    model: "test-model",
+    supports1m: false,
     createdAt: 1000,
     updatedAt: 1000,
     ...overrides,
-  };
-}
-
-function makeProfile(name: string, provider = "p1", model = "m1"): Profile {
-  return {
-    name,
-    opus: { provider, model },
-    sonnet: { provider, model },
-    haiku: { provider, model },
-    createdAt: 2000,
-    updatedAt: 2000,
   };
 }
 
@@ -73,130 +61,87 @@ describe("config CRUD (CCLAU_CONFIG isolated)", () => {
   test.serial("missing file → empty config", () => {
     expect(existsSync(tempConfigPath)).toBe(false);
     const cfg = loadAppConfig();
-    expect(cfg).toEqual({ providers: {}, profiles: {}, aliases: buildDefaultAliases() });
+    expect(cfg).toEqual({ profiles: {} });
   });
 
-  test.serial("subscription CRUD roundtrip", async () => {
-    await upsertSubscription(makeSub("alpha"));
-    await upsertSubscription(makeSub("beta"));
+  test.serial("profile CRUD roundtrip", async () => {
+    await upsertProfile(makeProfile("alpha"));
+    await upsertProfile(makeProfile("beta"));
 
-    expect(getSubscription("alpha")?.endpoint).toBe("https://example.invalid/alpha");
-    expect(getSubscription("beta")?.apiKey).toBe("key-beta");
-    expect(getSubscription("missing")).toBeUndefined();
+    expect(getProfile("alpha")?.endpoint).toBe("https://example.invalid/alpha");
+    expect(getProfile("beta")?.apiKey).toBe("key-beta");
+    expect(getProfile("missing")).toBeUndefined();
 
-    const list = listSubscriptions();
-    expect(list.map((s) => s.name)).toEqual(["alpha", "beta"]); // localeCompare 排序
+    const list = listProfiles().map((p) => p.name);
+    expect(list).toEqual(["alpha", "beta"]); // localeCompare 排序
   });
 
   test.serial("TOML roundtrip via save/load", async () => {
     const cfg = {
-      providers: {
+      profiles: {
         foo: {
           endpoint: "https://foo.invalid",
           apiKey: "sk-foo",
-          type: "anthropic" as const,
-          mode: "rectify" as const,
-          models: [{ id: "foo-1", supports_1m: true }],
+          mode: "rectify" as Mode,
+          model: "foo-1",
+          supports1m: true,
           createdAt: 5000,
           updatedAt: 5000,
         },
       },
-      profiles: {
-        p1: {
-          opus_provider: "foo",
-          opus_model: "foo-1",
-          sonnet_provider: "foo",
-          sonnet_model: "foo-1",
-          haiku_provider: "",
-          haiku_model: "foo-1",
-          createdAt: 6000,
-          updatedAt: 6000,
-        },
-      },
-      aliases: {},
     };
     await saveAppConfig(cfg);
 
     expect(existsSync(tempConfigPath)).toBe(true);
     const reloaded = loadAppConfig();
-    const foo = reloaded.providers.foo!;
-    const p1 = reloaded.profiles.p1!;
+    const foo = reloaded.profiles.foo!;
     expect(foo.endpoint).toBe("https://foo.invalid");
     expect(foo.mode).toBe("rectify");
-    expect(foo.models[0]!.supports_1m).toBe(true);
-    expect(p1.haiku_provider).toBe(""); // 空串保留
+    expect(foo.model).toBe("foo-1");
+    expect(foo.supports1m).toBe(true);
   });
 
-  test.serial("removeSubscription cascade: profile tier refs → empty string", async () => {
-    // 写一个 provider + 3 个 tier 都引用它的 profile
-    await saveAppConfig({
-      providers: {
-        doomed: {
-          endpoint: "https://doom.invalid",
-          apiKey: "k",
-          type: "anthropic",
-          mode: "direct",
-          models: [],
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        keeper: {
-          endpoint: "https://keep.invalid",
-          apiKey: "k",
-          type: "anthropic",
-          mode: "direct",
-          models: [],
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      },
-      profiles: {
-        ref: {
-          opus_provider: "doomed",
-          opus_model: "x",
-          sonnet_provider: "doomed",
-          sonnet_model: "y",
-          haiku_provider: "keeper",
-          haiku_model: "z",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      },
-      aliases: {},
-    });
+  test.serial("removeProfile idempotency", async () => {
+    await upsertProfile(makeProfile("first"));
+    await upsertProfile(makeProfile("second"));
 
-    const removed = await removeSubscription("doomed");
-    expect(removed).toBe(true);
-
-    const cfg = loadAppConfig();
-    expect(cfg.providers.doomed).toBeUndefined();
-    const ref = cfg.profiles.ref!;
-    expect(ref.opus_provider).toBe("");    // cascade 命中
-    expect(ref.sonnet_provider).toBe("");  // cascade 命中
-    expect(ref.haiku_provider).toBe("keeper"); // 没引用 doomed，原样
-  });
-
-  test.serial("profile CRUD", async () => {
-    await saveAppConfig({
-      providers: {},
-      profiles: {},
-      aliases: {},
-    });
-
-    await upsertProfile(makeProfile("first", "alpha", "m"));
-    await upsertProfile(makeProfile("second", "beta", "n"));
-
-    expect(getProfile("first")?.sonnet.provider).toBe("alpha");
-    expect(getProfile("second")?.opus.model).toBe("n");
-
-    const list = listProfiles().map((p) => p.name);
-    expect(list).toEqual(["first", "second"]);
-
+    expect(getProfile("first")?.name).toBe("first");
     const removed = await removeProfile("first");
     expect(removed).toBe(true);
     expect(getProfile("first")).toBeUndefined();
 
     const removedAgain = await removeProfile("first");
     expect(removedAgain).toBe(false);
+
+    const list = listProfileNames();
+    expect(list).toEqual(["second"]);
+  });
+
+  test.serial("getDefaultProfile: no default → undefined", async () => {
+    await upsertProfile(makeProfile("p1"));
+    expect(getDefaultProfile()).toBeUndefined();
+  });
+
+  test.serial("getDefaultProfile: returns the profile with default=true", async () => {
+    await upsertProfile(makeProfile("p1"));
+    await upsertProfile(makeProfile("p2", { default: true }));
+    const def = getDefaultProfile();
+    expect(def?.name).toBe("p2");
+  });
+
+  test.serial("getDefaultProfile: returns first when multiple defaults exist", async () => {
+    // 配置层只读字段：多 default 时返第一个（launch 时报错让用户清）
+    await upsertProfile(makeProfile("a", { default: true }));
+    await upsertProfile(makeProfile("b", { default: true }));
+    const def = getDefaultProfile();
+    expect(def?.name).toBeDefined();
+    expect(["a", "b"]).toContain(def!.name);
+  });
+
+  test.serial("supports1m preserved through roundtrip", async () => {
+    await upsertProfile(makeProfile("p1", { supports1m: true }));
+    expect(getProfile("p1")?.supports1m).toBe(true);
+    await upsertProfile(makeProfile("p1", { supports1m: false }));
+    expect(getProfile("p1")?.supports1m).toBe(false);
   });
 });

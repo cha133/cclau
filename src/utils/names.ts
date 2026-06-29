@@ -4,7 +4,7 @@
 // suggestNameOnConflict：cclau 独有 — 同 provider 重复 add 时按 mode 自动加后缀
 // validateKebabName：clack 的 validate 回调，返回错误字符串 / undefined
 
-import type { SubscriptionMode } from "../types.js";
+import type { Mode } from "../types.js";
 
 /**
  * 把任意字符串转成 kebab-case。
@@ -30,20 +30,20 @@ export function kebabCase(s: string): string {
  *
  * 规则：
  * 1. desired 未被占用 → 返回 desired
- * 2. desired 被占用，且该已存在 provider 的 mode 与 newMode 不同 →
+ * 2. desired 被占用，且该已存在 profile 的 mode 与 newMode 不同 →
  *    返回 `desired-<newMode>`（如 deepseek 已是 direct，新增 rectify → deepseek-rectify）
  * 3. 否则（或 suffix 也被占）→ 返回 ""，调用方让用户手输
  *
  * @param desired 期望的名字（通常是 kebabCase(vendorName)）
- * @param existingNames 当前已存在的 provider 名字列表
+ * @param existingNames 当前已存在的 profile 名字列表
  * @param existingModes 名字 → mode 的映射（用于判断"已存在的 mode 是什么"）
  * @param newMode 这次新增的 mode
  */
 export function suggestNameOnConflict(
   desired: string,
   existingNames: string[],
-  existingModes: Record<string, SubscriptionMode>,
-  newMode: SubscriptionMode,
+  existingModes: Record<string, Mode>,
+  newMode: Mode,
 ): string {
   if (!existingNames.includes(desired)) return desired;
 

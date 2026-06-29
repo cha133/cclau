@@ -1,150 +1,226 @@
-// cclau edit - 编辑 provider 的 model 集合（紧抄 cctra edit 风格）
+// cclau edit <name> - 编辑 profile（单 model 6 字段）
+//
+// 可改字段：endpoint / apiKey / mode / model / supports1m / default
 //
 // 流程：
-//   1. 加载 provider；不存在直接报错退出
-//   2. spinner 拉上游 models（失败也 OK，仅能 toggle current）
-//   3. 合并 options：current model 预勾 + hint:"current"；new 候选不勾 + hint:"new"
-//   4. multiselect with initialValues 让用户 toggle
-//   5. 算 diff（removed / addedIds）
-//   6. 无变更早退；有变更则对新增 model 逐个问 1m（旧 model 的 supports_1m 保留）
-//   7. upsertSubscription 写盘
-//
-// 仅动 models 集合 —— endpoint / apiKey / type / mode / rectifier / createdAt
-// 全部 spread `...sub` 透传。想改这些字段请手编 TOML（BOARD.md 指导思想）。
+//   1. fuzzy 解析 profile 名（edit 是非破坏，silent top-1 即可）
+//   2. 渲染当前 profile
+//   3. select 菜单循环选字段编辑（done 退出）
+//   4. 改 default 时清掉其他 profile 的 default 标志
+//   5. 写盘
 
 import * as p from "@clack/prompts";
-import { getSubscription, listProviderNames, upsertSubscription, loadAppConfig, saveAppConfig } from "../config.js";
+import {
+  getProfile,
+  listProfiles,
+  listProfileNames,
+  upsertProfile,
+} from "../config.js";
 import { fuzzyTopN } from "../fuzzy.js";
-import type { ModelInfo, Subscription } from "../types.js";
+import type { Mode, Profile } from "../types.js";
 import { pc } from "../utils/logger.js";
-import { fetchUpstreamModels } from "../core/model-fetch.js";
-import { registerAutoAliases, unbindAliasesPointingTo } from "../core/auto-alias.js";
+
+function maskKey(key: string): string {
+  return pc.dim(`${key.slice(0, 7)}...${key.slice(-4)}`);
+}
 
 export async function editCmd(name: string): Promise<void> {
-  // fuzzy 解析：silent top-1 + 提示（edit 是非破坏操作，不需歧义保护）
-  const top = fuzzyTopN(name, listProviderNames(), 1);
+  // 1. fuzzy 解析
+  const top = fuzzyTopN(name, listProfileNames(), 1);
   if (top.length === 0) {
-    const all = listProviderNames();
-    p.log.error(`provider "${name}" 不存在。现有: ${all.join(", ") || "(空)"}`);
+    const all = listProfileNames();
+    p.log.error(`profile "${name}" 不存在。现有: ${all.join(", ") || "(空)"}`);
     process.exit(1);
   }
   const resolved = top[0]!.name;
-  if (resolved !== name) p.log.message(pc.dim(`匹配到 provider "${resolved}"`));
+  if (resolved !== name) p.log.message(pc.dim(`匹配到 profile "${resolved}"`));
 
-  const sub = getSubscription(resolved);
-  if (!sub) {
-    // race: fuzzy 命中但 getSubscription miss（极罕见，理论上同步）
-    p.log.error(`provider "${resolved}" 不存在`);
+  const original = getProfile(resolved);
+  if (!original) {
+    p.log.error(`profile "${resolved}" 不存在`);
     process.exit(1);
   }
 
   console.log("");
   p.intro(pc.bgCyan(pc.black(" cclau edit ")));
 
-  const modeColor = sub.mode === "direct" ? pc.green : sub.mode === "rectify" ? pc.yellow : pc.cyan;
-  p.log.message(
-    `Provider: ${pc.bold(sub.name)} (${modeColor(sub.mode)}, ${sub.type}, ${sub.models.length} model${sub.models.length === 1 ? "" : "s"})`,
-  );
+  // 2. 渲染当前
+  printProfile(original);
 
-  // 1. 拉上游 models
-  const s = p.spinner();
-  s.start("Fetching model list from upstream...");
-  let upstreamNames: string[] = [];
-  try {
-    upstreamNames = await fetchUpstreamModels({
-      endpoint: sub.endpoint.trim(),
-      token: (sub.apiKey ?? "").trim(),
+  // 3. 字段菜单循环
+  let current: Profile = { ...original };
+
+  while (true) {
+    const field = await p.select({
+      message: "编辑哪个字段？（done 退出）",
+      options: [
+        { value: "endpoint", label: "endpoint", hint: current.endpoint },
+        { value: "apiKey", label: "apiKey", hint: maskKey(current.apiKey) },
+        { value: "mode", label: "mode", hint: current.mode },
+        { value: "model", label: "model", hint: current.model },
+        {
+          value: "supports1m",
+          label: "supports1m",
+          hint: String(current.supports1m),
+        },
+        {
+          value: "default",
+          label: "default",
+          hint: current.default ? "true" : "false",
+        },
+        { value: "done", label: "done", hint: "退出编辑" },
+      ],
     });
-    s.stop(`Found ${upstreamNames.length} model(s).`);
-  } catch {
-    s.stop("Failed to fetch upstream models, you can still toggle existing ones.");
-  }
-
-  // 2. 合并 options：current 预勾 + new 不勾（用 hint 视觉区分）
-  const currentIds = new Set(sub.models.map((m) => m.id));
-  const options: Array<{ value: string; label: string; hint?: string }> = [];
-  for (const m of sub.models) {
-    options.push({ value: m.id, label: m.id, hint: "current" });
-  }
-  for (const id of [...new Set(upstreamNames)].sort((a, b) => a.localeCompare(b))) {
-    if (!currentIds.has(id)) {
-      options.push({ value: id, label: id, hint: "new" });
+    if (p.isCancel(field)) {
+      p.cancel("已取消");
+      process.exit(0);
     }
+    if (field === "done") break;
+
+    current = await editField(current, field);
+    p.log.success(`已更新 ${field}`);
+    console.log();
   }
 
-  if (options.length === 0) {
-    p.outro(pc.yellow("没有可编辑的 model（当前为空且上游也没拉到）"));
-    return;
-  }
-
-  // 3. multiselect 预选当前
-  const res = await p.multiselect({
-    message: "勾选要保留的 model（空格切换；勾上的 = 保留/新增，没勾 = 移除）：",
-    options,
-    required: false,
-    initialValues: sub.models.map((m) => m.id),
-  });
-  if (p.isCancel(res)) {
-    p.cancel("已取消");
-    process.exit(0);
-  }
-  const selected = res as string[];
-
-  // 4. diff
-  const selectedSet = new Set(selected);
-  const removed = sub.models.filter((m) => !selectedSet.has(m.id));
-  const addedIds = selected.filter((id) => !currentIds.has(id));
-
-  if (removed.length === 0 && addedIds.length === 0) {
+  // 4. 是否有变更？
+  const changed = isChanged(original, current);
+  if (!changed) {
     p.outro(pc.dim("无变更"));
     return;
   }
 
-  // 5. 对新增 model 问 1m（与 add 第 8 步一致；老 model 保留旧 supports_1m）
-  const newModelInfos: ModelInfo[] = [];
-  for (const id of addedIds) {
-    const r = await p.confirm({
-      message: `Model "${id}" 是否支持 1M context？`,
-      initialValue: true,
-    });
-    if (p.isCancel(r)) {
-      p.cancel("已取消");
-      process.exit(0);
-    }
-    newModelInfos.push({ id, supports_1m: r });
-  }
-
-  const keptModels = sub.models.filter((m) => selectedSet.has(m.id));
-  const finalModels = [...keptModels, ...newModelInfos];
-
-  // 6. 写盘 —— spread 保留 endpoint / apiKey / type / mode / rectifier / createdAt
-  const updated: Subscription = {
-    ...sub,
-    models: finalModels,
-    updatedAt: Date.now(),
-  };
-  await upsertSubscription(updated);
-
-  // v6：alias 联动 —— 新增 model auto-register；移除 model unbind 指向它的 alias
-  const config = loadAppConfig();
-  let aliasChanged = false;
-  if (addedIds.length > 0) {
-    // excludeSource = sub.name（edit 时不算自己）
-    registerAutoAliases(config, sub.name, addedIds, sub.name);
-    aliasChanged = true;
-  }
-  if (removed.length > 0) {
-    for (const m of removed) {
-      const target = `${sub.name}/${m.id}`;
-      const unbound = unbindAliasesPointingTo(config, target);
-      if (unbound.length > 0) aliasChanged = true;
+  // 5. default 联动：清掉其他 profile 的 default
+  if (current.default === true) {
+    for (const prof of listProfiles()) {
+      if (prof.name !== current.name && prof.default === true) {
+        const updated: Profile = { ...prof };
+        delete updated.default;
+        updated.updatedAt = Date.now();
+        await upsertProfile(updated);
+      }
     }
   }
-  if (aliasChanged) await saveAppConfig(config);
 
-  p.outro(
-    pc.green(
-      `✓ 已更新 provider "${sub.name}"（-${removed.length} +${addedIds.length}，共 ${finalModels.length} model${finalModels.length === 1 ? "" : "s"}）`,
-    ),
+  current.updatedAt = Date.now();
+  await upsertProfile(current);
+
+  p.outro(pc.green(`✓ 已保存 profile "${current.name}"`));
+}
+
+function printProfile(profile: Profile): void {
+  const modeColor =
+    profile.mode === "direct"
+      ? pc.green
+      : profile.mode === "rectify"
+        ? pc.yellow
+        : pc.cyan;
+  console.log(pc.bold(`Profile: ${profile.name}`));
+  console.log(`  ${pc.dim("endpoint:")} ${profile.endpoint}`);
+  console.log(`  ${pc.dim("apiKey  :")} ${maskKey(profile.apiKey)}`);
+  console.log(`  ${pc.dim("mode    :")} ${modeColor(profile.mode)}`);
+  console.log(`  ${pc.dim("model   :")} ${profile.model}`);
+  console.log(`  ${pc.dim("1m      :")} ${profile.supports1m}`);
+  console.log(`  ${pc.dim("default :")} ${profile.default ? "true" : "false"}`);
+}
+
+type Field = "endpoint" | "apiKey" | "mode" | "model" | "supports1m" | "default";
+
+async function editField(profile: Profile, field: Field): Promise<Profile> {
+  switch (field) {
+    case "endpoint": {
+      const v = await p.text({
+        message: "endpoint：",
+        initialValue: profile.endpoint,
+        validate: (s) => (s ? undefined : "不能为空"),
+      });
+      if (p.isCancel(v)) {
+        p.cancel("已取消");
+        process.exit(0);
+      }
+      return { ...profile, endpoint: v };
+    }
+    case "apiKey": {
+      const v = await p.password({
+        message: "apiKey：",
+        validate: (s) => (s ? undefined : "不能为空"),
+      });
+      if (p.isCancel(v)) {
+        p.cancel("已取消");
+        process.exit(0);
+      }
+      return { ...profile, apiKey: v };
+    }
+    case "mode": {
+      const v = await p.select<Mode>({
+        message: "mode：",
+        initialValue: profile.mode,
+        options: [
+          { value: "direct" as const, label: "direct", hint: "anthropic 直连" },
+          {
+            value: "rectify" as const,
+            label: "rectify",
+            hint: "anthropic 整流",
+          },
+          {
+            value: "openai" as const,
+            label: "openai",
+            hint: "openai → anthropic 转换",
+          },
+        ],
+      });
+      if (p.isCancel(v)) {
+        p.cancel("已取消");
+        process.exit(0);
+      }
+      return { ...profile, mode: v };
+    }
+    case "model": {
+      const v = await p.text({
+        message: "model：",
+        initialValue: profile.model,
+        validate: (s) => (s ? undefined : "不能为空"),
+      });
+      if (p.isCancel(v)) {
+        p.cancel("已取消");
+        process.exit(0);
+      }
+      return { ...profile, model: v };
+    }
+    case "supports1m": {
+      const v = await p.confirm({
+        message: "supports1m：",
+        initialValue: profile.supports1m,
+      });
+      if (p.isCancel(v)) {
+        p.cancel("已取消");
+        process.exit(0);
+      }
+      return { ...profile, supports1m: v };
+    }
+    case "default": {
+      const v = await p.confirm({
+        message: "default：",
+        initialValue: profile.default === true,
+      });
+      if (p.isCancel(v)) {
+        p.cancel("已取消");
+        process.exit(0);
+      }
+      const updated: Profile = { ...profile };
+      if (v) updated.default = true;
+      else delete updated.default;
+      return updated;
+    }
+  }
+}
+
+function isChanged(a: Profile, b: Profile): boolean {
+  return (
+    a.endpoint !== b.endpoint ||
+    a.apiKey !== b.apiKey ||
+    a.mode !== b.mode ||
+    a.model !== b.model ||
+    a.supports1m !== b.supports1m ||
+    (a.default === true) !== (b.default === true)
   );
 }

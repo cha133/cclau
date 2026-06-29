@@ -2,6 +2,8 @@
 // 1M context 标记处理：apply1m / strip1m / formatModelWith1m / findModelInfo
 // ----------------------------------------------------------------------------
 // 锁住 v2/v5 不变量配套：1m suffix 是 sidecar/直连分歧点 + registry key 计算源
+//
+// refactor 之后：ModelInfo 类型已删（合入 Profile），这里用 inline shape。
 // ============================================================================
 
 import { describe, test, expect } from "bun:test";
@@ -12,7 +14,6 @@ import {
   formatModelWith1m,
   findModelInfo,
 } from "../src/core/model-1m.js";
-import type { ModelInfo } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 
@@ -84,7 +85,9 @@ describe("strip1m", () => {
   });
 
   test("幂等：strip1m(strip1m(x)) === strip1m(x)", () => {
-    expect(strip1m(strip1m("claude-sonnet-4-6[1m]"))).toBe(strip1m("claude-sonnet-4-6[1m]"));
+    expect(strip1m(strip1m("claude-sonnet-4-6[1m]"))).toBe(
+      strip1m("claude-sonnet-4-6[1m]"),
+    );
   });
 });
 
@@ -116,15 +119,19 @@ describe("formatModelWith1m", () => {
 // ---------------------------------------------------------------------------
 
 describe("findModelInfo", () => {
-  const models: ModelInfo[] = [
-    { id: "claude-sonnet-4-6", supports_1m: true },
-    { id: "claude-haiku-4-5", supports_1m: false },
-    { id: "claude-opus-4-8", supports_1m: true },
+  interface Model {
+    id: string;
+    supports1m: boolean;
+  }
+  const models: Model[] = [
+    { id: "claude-sonnet-4-6", supports1m: true },
+    { id: "claude-haiku-4-5", supports1m: false },
+    { id: "claude-opus-4-8", supports1m: true },
   ];
 
   test("命中 → 返回对应 entry", () => {
     const m = findModelInfo(models, "claude-haiku-4-5");
-    expect(m).toEqual({ id: "claude-haiku-4-5", supports_1m: false });
+    expect(m).toEqual({ id: "claude-haiku-4-5", supports1m: false });
   });
 
   test("未命中 → undefined", () => {
@@ -132,7 +139,7 @@ describe("findModelInfo", () => {
   });
 
   test("空列表 → undefined（不抛错）", () => {
-    expect(findModelInfo([], "anything")).toBeUndefined();
+    expect(findModelInfo<Model>([], "anything")).toBeUndefined();
   });
 
   test("支持泛型：custom shape 也能用", () => {
