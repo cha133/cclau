@@ -36,7 +36,6 @@ cclau work -c       # launch with claude args (everything after profile name pas
 | `cclau ls` | List all profiles |
 | `cclau show <name>` | Show profile details |
 | `cclau default [name]` | Show or set the default profile (nvm-style) |
-| `cclau default --unset` | Unset the default |
 | `cclau <name> [claude args…]` | Launch Claude Code with a profile |
 | `cclau -h` / `cclau --help` | Show cclau help |
 | `cclau -v` / `cclau --version` | Show cclau version |

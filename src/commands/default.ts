@@ -1,13 +1,13 @@
 // ============================================================================
-// cclau default [name] [--unset]
+// cclau default [name]
 //
 // nvm-style:
 //   cclau default              -- show current default profile
 //   cclau default <name>       -- set as default (fuzzy match)
-//   cclau default --unset      -- unset all defaults
 //
 // Config layer allows exactly one default. Setting a new default automatically
-// clears the default flag on all other profiles.
+// clears the default flag on all other profiles. To switch defaults, just run
+// `cclau default <other>` — no need to unset first.
 // ============================================================================
 
 import { Command } from "commander";
@@ -25,12 +25,7 @@ export function registerDefault(program: Command): void {
   program
     .command("default [name]")
     .description("Show or set the default profile (nvm-style)")
-    .option("--unset", "Unset the current default profile")
-    .action(async (name?: string, opts?: { unset?: boolean }) => {
-      if (opts?.unset) {
-        await unsetDefault();
-        return;
-      }
+    .action(async (name?: string) => {
       if (!name) {
         showDefault();
         return;
@@ -119,28 +114,4 @@ async function setDefault(name: string): Promise<void> {
   };
   await upsertProfile(updated);
   p.log.success(`✓ default → "${resolved}"`);
-}
-
-async function unsetDefault(): Promise<void> {
-  const profiles = listProfiles();
-  const defaults = profiles.filter((p) => p.default === true);
-  if (defaults.length === 0) {
-    p.log.info("(no default profile to unset)");
-    return;
-  }
-
-  for (const prof of defaults) {
-    const updated: typeof prof = { ...prof };
-    delete updated.default;
-    updated.updatedAt = Date.now();
-    await upsertProfile(updated);
-  }
-
-  if (defaults.length === 1) {
-    p.log.success(`✓ cleared default "${defaults[0]!.name}"`);
-  } else {
-    p.log.success(
-      `✓ cleared ${defaults.length} default profiles: ${defaults.map((d) => d.name).join(", ")}`,
-    );
-  }
 }
