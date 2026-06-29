@@ -1,13 +1,13 @@
-// cclau edit <name> - 编辑 profile（单 model 6 字段）
+// cclau edit <name> - edit a profile (6 fields)
 //
-// 可改字段：endpoint / apiKey / mode / model / supports1m / default
+// Editable fields: endpoint / apiKey / mode / model / supports1m / default
 //
-// 流程：
-//   1. fuzzy 解析 profile 名（edit 是非破坏，silent top-1 即可）
-//   2. 渲染当前 profile
-//   3. select 菜单循环选字段编辑（done 退出）
-//   4. 改 default 时清掉其他 profile 的 default 标志
-//   5. 写盘
+// Flow:
+//   1. Fuzzy-resolve profile name (edit is non-destructive, silent top-1 ok)
+//   2. Render current profile
+//   3. Loop: pick field to edit (done to exit)
+//   4. When setting default, clear other profiles' default flag
+//   5. Write to disk
 
 import * as p from "@clack/prompts";
 import {
@@ -25,34 +25,34 @@ function maskKey(key: string): string {
 }
 
 export async function editCmd(name: string): Promise<void> {
-  // 1. fuzzy 解析
+  // 1. Fuzzy resolve
   const top = fuzzyTopN(name, listProfileNames(), 1);
   if (top.length === 0) {
     const all = listProfileNames();
-    p.log.error(`profile "${name}" 不存在。现有: ${all.join(", ") || "(空)"}`);
+    p.log.error(`profile "${name}" does not exist. existing: ${all.join(", ") || "(empty)"}`);
     process.exit(1);
   }
   const resolved = top[0]!.name;
-  if (resolved !== name) p.log.message(pc.dim(`匹配到 profile "${resolved}"`));
+  if (resolved !== name) p.log.message(pc.dim(`matched profile "${resolved}"`));
 
   const original = getProfile(resolved);
   if (!original) {
-    p.log.error(`profile "${resolved}" 不存在`);
+    p.log.error(`profile "${resolved}" does not exist`);
     process.exit(1);
   }
 
   console.log("");
   p.intro(pc.bgCyan(pc.black(" cclau edit ")));
 
-  // 2. 渲染当前
+  // 2. Render current
   printProfile(original);
 
-  // 3. 字段菜单循环
+  // 3. Field menu loop
   let current: Profile = { ...original };
 
   while (true) {
     const field = await p.select({
-      message: "编辑哪个字段？（done 退出）",
+      message: "Edit which field? (done to exit)",
       options: [
         { value: "endpoint", label: "endpoint", hint: current.endpoint },
         { value: "apiKey", label: "apiKey", hint: maskKey(current.apiKey) },
@@ -68,28 +68,28 @@ export async function editCmd(name: string): Promise<void> {
           label: "default",
           hint: current.default ? "true" : "false",
         },
-        { value: "done", label: "done", hint: "退出编辑" },
+        { value: "done", label: "done", hint: "exit edit" },
       ],
     });
     if (p.isCancel(field)) {
-      p.cancel("已取消");
+      p.cancel("cancelled");
       process.exit(0);
     }
     if (field === "done") break;
 
     current = await editField(current, field);
-    p.log.success(`已更新 ${field}`);
+    p.log.success(`updated ${field}`);
     console.log();
   }
 
-  // 4. 是否有变更？
+  // 4. Any change?
   const changed = isChanged(original, current);
   if (!changed) {
-    p.outro(pc.dim("无变更"));
+    p.outro(pc.dim("no changes"));
     return;
   }
 
-  // 5. default 联动：清掉其他 profile 的 default
+  // 5. Default cascade: clear other profiles' default flag
   if (current.default === true) {
     for (const prof of listProfiles()) {
       if (prof.name !== current.name && prof.default === true) {
@@ -104,7 +104,7 @@ export async function editCmd(name: string): Promise<void> {
   current.updatedAt = Date.now();
   await upsertProfile(current);
 
-  p.outro(pc.green(`✓ 已保存 profile "${current.name}"`));
+  p.outro(pc.green(`✓ saved profile "${current.name}"`));
 }
 
 function printProfile(profile: Profile): void {
@@ -129,81 +129,81 @@ async function editField(profile: Profile, field: Field): Promise<Profile> {
   switch (field) {
     case "endpoint": {
       const v = await p.text({
-        message: "endpoint：",
+        message: "endpoint:",
         initialValue: profile.endpoint,
-        validate: (s) => (s ? undefined : "不能为空"),
+        validate: (s) => (s ? undefined : "required"),
       });
       if (p.isCancel(v)) {
-        p.cancel("已取消");
+        p.cancel("cancelled");
         process.exit(0);
       }
       return { ...profile, endpoint: v };
     }
     case "apiKey": {
       const v = await p.password({
-        message: "apiKey：",
-        validate: (s) => (s ? undefined : "不能为空"),
+        message: "apiKey:",
+        validate: (s) => (s ? undefined : "required"),
       });
       if (p.isCancel(v)) {
-        p.cancel("已取消");
+        p.cancel("cancelled");
         process.exit(0);
       }
       return { ...profile, apiKey: v };
     }
     case "mode": {
       const v = await p.select<Mode>({
-        message: "mode：",
+        message: "mode:",
         initialValue: profile.mode,
         options: [
-          { value: "direct" as const, label: "direct", hint: "anthropic 直连" },
+          { value: "direct" as const, label: "direct", hint: "anthropic direct" },
           {
             value: "rectify" as const,
             label: "rectify",
-            hint: "anthropic 整流",
+            hint: "anthropic with rectifier",
           },
           {
             value: "openai" as const,
             label: "openai",
-            hint: "openai → anthropic 转换",
+            hint: "openai → anthropic conversion",
           },
         ],
       });
       if (p.isCancel(v)) {
-        p.cancel("已取消");
+        p.cancel("cancelled");
         process.exit(0);
       }
       return { ...profile, mode: v };
     }
     case "model": {
       const v = await p.text({
-        message: "model：",
+        message: "model:",
         initialValue: profile.model,
-        validate: (s) => (s ? undefined : "不能为空"),
+        validate: (s) => (s ? undefined : "required"),
       });
       if (p.isCancel(v)) {
-        p.cancel("已取消");
+        p.cancel("cancelled");
         process.exit(0);
       }
       return { ...profile, model: v };
     }
     case "supports1m": {
       const v = await p.confirm({
-        message: "supports1m：",
+        message: "supports1m:",
         initialValue: profile.supports1m,
       });
       if (p.isCancel(v)) {
-        p.cancel("已取消");
+        p.cancel("cancelled");
         process.exit(0);
       }
       return { ...profile, supports1m: v };
     }
     case "default": {
       const v = await p.confirm({
-        message: "default：",
+        message: "default:",
         initialValue: profile.default === true,
       });
       if (p.isCancel(v)) {
-        p.cancel("已取消");
+        p.cancel("cancelled");
         process.exit(0);
       }
       const updated: Profile = { ...profile };

@@ -1,16 +1,16 @@
-// cclau <name> [claude args...] - 主启动命令
+// cclau <name> [claude args...] - main launch command
 // cclau (no args)               - launch default profile
 //
-// 流程：
-//   1. fuzzy 解析 profile 名（launch 是破坏性，歧义时拒绝）
+// Flow:
+//   1. Fuzzy-resolve profile name (launch is destructive, reject on ambiguity)
 //   2. resolveLaunch → { settingsModel, upstreamModel, sidecar }
-//   3. apiKey 检查
-//   4. 据 sidecar.needed 决策起不起 server
-//      - false（direct） → 不起 server，writeSettingsFile(port=undefined) → baseUrl = endpoint
-//      - true（rectify / openai）→ findFreePort → buildRegistry(profile) → startServer → writeSettingsFile(port)
-//   5. spawn claude → 清理 server + 临时 settings file
+//   3. apiKey sanity check (resolveLaunch already errors)
+//   4. Decide sidecar based on sidecar.needed
+//      - false (direct) → no server, writeSettingsFile(port=undefined) → baseUrl = endpoint
+//      - true  (rectify / openai) → findFreePort → buildRegistry(profile) → startServer → writeSettingsFile(port)
+//   5. spawn claude → cleanup server + temp settings file
 //
-// 4 个 ANTHROPIC_DEFAULT_*_MODEL env 全 = settingsModel（单 profile，无 tier 区分）。
+// All 4 ANTHROPIC_DEFAULT_*_MODEL envs = settingsModel (single profile, no tier split).
 
 import * as p from "@clack/prompts";
 import {
@@ -30,36 +30,36 @@ export async function launchCmd(
   query: string,
   claudeArgs: string[],
 ): Promise<void> {
-  // 1. fuzzy 解析 profile
+  // 1. Fuzzy-resolve profile
   const all = listProfileNames();
   if (all.length === 0) {
-    p.log.error(`暂无 profile。先运行 ${pc.cyan("`cclau add`")} 创建一个。`);
+    p.log.error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
     process.exit(1);
   }
 
   const top = fuzzyTopN(query, all, 2);
   if (top.length === 0) {
     p.log.error(
-      `没有匹配到 profile "${query}"。现有 profile: ${all.join(", ")}`,
+      `no profile matched "${query}". existing: ${all.join(", ")}`,
     );
     process.exit(1);
   }
   if (isAmbiguous(top)) {
     p.log.error(
-      `"${query}" 模糊匹配到多个 profile: ${top.map((s) => s.name).join("、")}。请用更精确名字。`,
+      `"${query}" ambiguously matches multiple profiles: ${top.map((s) => s.name).join(", ")}. please use a more specific name.`,
     );
     process.exit(1);
   }
   const resolved = top[0]!.name;
-  if (resolved !== query) p.log.message(pc.dim(`匹配到 profile "${resolved}"`));
+  if (resolved !== query) p.log.message(pc.dim(`matched profile "${resolved}"`));
 
   const profile = getProfile(resolved);
   if (!profile) {
-    p.log.error(`profile "${resolved}" 不存在`);
+    p.log.error(`profile "${resolved}" does not exist`);
     process.exit(1);
   }
 
-  // 2. 解析 launch 决策（必填字段校验）
+  // 2. Resolve launch decision (required-field validation)
   let launch;
   try {
     launch = resolveLaunch(profile);
@@ -68,7 +68,7 @@ export async function launchCmd(
     process.exit(1);
   }
 
-  // 3. 据 sidecar.needed 决策起不起 server
+  // 3. Decide sidecar
   let server: ReturnType<typeof startServer> | undefined;
   let port: number | undefined;
 
@@ -78,14 +78,14 @@ export async function launchCmd(
     server = startServer(registry, port);
   }
 
-  // 4. 写 settings
+  // 4. Write settings
   const settings = await writeSettingsFile(profile, port);
 
-  // 5. 日志
+  // 5. Log
   const modeDesc = launch.sidecar.needed
     ? `sidecar (${launch.sidecar.reason}, port: ${port})`
     : `direct (zero-hop)`;
-  p.log.info(`启动 claude code (profile: ${profile.name}, ${modeDesc})`);
+  p.log.info(`launching claude code (profile: ${profile.name}, ${modeDesc})`);
   console.log(
     pc.dim(
       `endpoint: ${profile.endpoint}, model: ${profile.model}${profile.supports1m ? " [1m]" : ""}`,
@@ -95,7 +95,7 @@ export async function launchCmd(
   const { exited } = spawnClaude(settings, claudeArgs);
   const code = await exited;
 
-  // 6. 清理
+  // 6. Cleanup
   if (server) {
     server.stop();
     console.log(`sidecar server stopped (port ${port})`);
@@ -105,15 +105,15 @@ export async function launchCmd(
 }
 
 /**
- * `cclau` 无参时调用：取 default profile → 调 launchCmd。
- * 多 default 或 0 default 的报错在这里。
+ * Called by `cclau` (no args): resolve default profile → launchCmd.
+ * Reports 0-default and multi-default errors here.
  */
 export async function launchDefault(args: string[]): Promise<void> {
   const def = getDefaultProfile();
   if (!def) {
-    console.error(pc.dim("(无 default profile)"));
+    console.error(pc.dim("(no default profile)"));
     console.error(
-      pc.dim(`运行 ${pc.cyan("`cclau default <name>`")} 设定。`),
+      pc.dim(`run ${pc.cyan("`cclau default <name>`")} to set one.`),
     );
     process.exit(1);
   }

@@ -1,6 +1,6 @@
-// 整流器：v0 接口预留 + applyRectifier 管道
-// 只做 anthropic 整流（首要目的是让 opencode go 这类非标 anthropic 端点能跑通）
-// openai 整流 YAGNI 砍掉
+// Rectifier: v0 interface stub + applyRectifier pipeline
+// Anthropic-only rectification (primary goal: make non-standard anthropic endpoints like opencode-go work).
+// OpenAI rectification cut for YAGNI.
 
 import type {
   AnthropicRectifier,
@@ -20,9 +20,9 @@ export interface RectifierContext {
 }
 
 /**
- * 整流管道（v0：2 个注入点）
- * - anthropic-in:  claude code → cclau → 上游前
- * - anthropic-out: 上游 → cclau → claude code 前
+ * Rectification pipeline (v0: 2 injection points)
+ * - anthropic-in:  claude code → cclau → upstream
+ * - anthropic-out: upstream → cclau → claude code
  */
 export function applyRectifier(rect: Rectifier, ctx: RectifierContext): unknown {
   const a = rect.anthropic;
@@ -41,8 +41,8 @@ export function applyRectifier(rect: Rectifier, ctx: RectifierContext): unknown 
 }
 
 /**
- * 流式场景下逐 chunk 应用整流器
- * anthropic SSE 事件数组 → 处理后的 SSE 事件数组
+ * Apply rectifier per-chunk in streaming scenarios.
+ * Anthropic SSE event array → processed SSE event array.
  */
 export function applyStreamRectifier(
   rect: Rectifier,
@@ -53,7 +53,7 @@ export function applyStreamRectifier(
   return events.map(fn);
 }
 
-// 类型守卫辅助
+// Type guard helper
 export function isAnthropicRectifier(x: unknown): x is AnthropicRectifier {
   return !!x && typeof x === "object";
 }

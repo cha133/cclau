@@ -1,7 +1,8 @@
-// Subscription.endpoint + type → 真正的 upstream URL
+// Subscription.endpoint + type → actual upstream URL
 //
-// 用户存的 endpoint 可以是 base URL（推荐）或完整路径（容忍粘错），helper 按 type 拼路径。
-// 设计来源：cctra 的 pickUpstreamPath + joinUrl，cclau 简化为单 helper。
+// User-stored endpoint can be base URL (recommended) or full path (tolerate paste errors);
+// helper assembles the path based on type.
+// Design source: cctra's pickUpstreamPath + joinUrl, cclau simplified to a single helper.
 
 export type Protocol = "anthropic" | "openai";
 
@@ -11,11 +12,11 @@ const DEFAULT_PATHS: Record<Protocol, string> = {
 };
 
 /**
- * 规则（按顺序）：
- * 1. 去尾斜杠
- * 2. URL 本身以期望路径结尾 → 原样返回（容忍用户粘了完整 URL）
- * 3. URL 以 `/v1` 结尾且期望路径以 `/v1/` 开头 → 去掉路径开头的 `/v1`，避免 `v1/v1/...` 重复
- * 4. 其他 → 直接拼
+ * Rules (in order):
+ * 1. Strip trailing slashes
+ * 2. URL already ends with expected path → return as-is (tolerate user pasting full URL)
+ * 3. URL ends with `/v1` and expected path starts with `/v1/` → strip `/v1` from path, avoid `v1/v1/...`
+ * 4. Otherwise → direct concat
  */
 export function buildUpstreamUrl(base: string, protocol: Protocol): string {
   const trimmed = base.replace(/\/+$/, "");

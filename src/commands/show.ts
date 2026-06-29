@@ -1,6 +1,6 @@
-// cclau show <name> - 显示 profile 详情
+// cclau show <name> - show profile details
 //
-// refactor 之后：name 只可能是 profile（provider 概念已删）。
+// refactored: name can only be a profile (provider concept deleted).
 
 import * as p from "@clack/prompts";
 import { getProfile, listProfileNames } from "../config.js";
@@ -18,15 +18,15 @@ export function showCmd(name: string): void {
   const top = fuzzyTopN(name, all, 1);
   const hit = top[0];
   if (!hit) {
-    const hint = all.length > 0 ? ` 你是想: ${all.slice(0, 3).join("、")}？` : "";
-    p.log.error(`"${name}" 不存在。${hint}运行 ${pc.cyan("`cclau ls`")} 看 profile 列表。`);
+    const hint = all.length > 0 ? ` did you mean: ${all.slice(0, 3).join(", ")}?` : "";
+    p.log.error(`"${name}" does not exist.${hint} run ${pc.cyan("`cclau ls`")} to see the profile list.`);
     process.exit(1);
   }
-  if (hit.name !== name) p.log.message(pc.dim(`匹配到 profile "${hit.name}"`));
+  if (hit.name !== name) p.log.message(pc.dim(`matched profile "${hit.name}"`));
 
   const profile = getProfile(hit.name);
   if (!profile) {
-    p.log.error(`profile "${hit.name}" 不存在`);
+    p.log.error(`profile "${hit.name}" does not exist`);
     process.exit(1);
   }
 
@@ -36,7 +36,7 @@ export function showCmd(name: string): void {
 function printProfile(p: Profile): void {
   const modeColor =
     p.mode === "direct" ? pc.green : p.mode === "rectify" ? pc.yellow : pc.cyan;
-  console.log(pc.bold(`Profile：${p.name}`));
+  console.log(pc.bold(`Profile: ${p.name}`));
   console.log(`  ${pc.dim("endpoint:")} ${p.endpoint}`);
   console.log(`  ${pc.dim("apiKey  :")} ${maskKey(p.apiKey)}`);
   console.log(`  ${pc.dim("mode    :")} ${modeColor(p.mode)}`);

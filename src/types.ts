@@ -1,14 +1,14 @@
-// cclau 类型定义
+// cclau type definitions
 //
-// 数据模型（重构后，单 profile 压平）：
+// Data model (refactored, single profile flattened):
 //   - Mode: "openai" | "direct" | "rectify"
 //   - Profile: name + endpoint + apiKey + mode + model + supports1m + optional default
 //   - Config: { profiles: Record<name, StoredProfile> }
 //
-// Provider / multi-tier / alias 概念全部删。
+// Provider / multi-tier / alias concepts all removed.
 
 // ============================================================================
-// 数据模型
+// Data model
 // ============================================================================
 
 export type Mode = "openai" | "direct" | "rectify";
@@ -22,15 +22,15 @@ export interface Profile {
   supports1m: boolean;
   default?: boolean;
   /**
-   * 仅 rectify 模式生效。builtin preset 自动填，或手编 TOML。
-   * direct / openai 模式忽略。
+   * Only effective in rectify mode. Auto-filled by builtin preset, or hand-edited TOML.
+   * Ignored in direct / openai modes.
    */
   rectifier?: Rectifier;
   createdAt: number;
   updatedAt: number;
 }
 
-// TOML 表 key 是 name，所以 StoredProfile 省略 name。
+// TOML table key is the profile name, so StoredProfile omits name.
 export type StoredProfile = Omit<Profile, "name">;
 
 export interface Config {
@@ -38,11 +38,11 @@ export interface Config {
 }
 
 // ============================================================================
-// 整流（rectify 模式用，preset / builtin / 手编 TOML 注入）
+// Rectifier (rectify mode, preset / builtin / hand-edited TOML)
 // ============================================================================
 
 /**
- * Anthropic 协议整流器（v0 唯一实际生效的整流器）
+ * Anthropic-protocol rectifier (v0: only one actually used)
  */
 export interface AnthropicRectifier {
   modelAlias?: Record<string, string>;
@@ -52,13 +52,13 @@ export interface AnthropicRectifier {
   streamChunkTransform?: (chunk: AnthropicStreamEvent) => AnthropicStreamEvent;
 }
 
-/** 整流配置（v0 只暴露 anthropic） */
+/** Rectifier config (v0 only exposes anthropic) */
 export interface Rectifier {
   anthropic?: AnthropicRectifier;
 }
 
 // ============================================================================
-// Anthropic 协议 types（server / preset-rules / passthrough 仍在用）
+// Anthropic protocol types (still used by server / preset-rules / passthrough)
 // ============================================================================
 
 export interface AnthropicRequest {
@@ -123,7 +123,7 @@ export type AnthropicStreamEvent =
   | { type: "error"; error: { type: string; message: string } };
 
 // ============================================================================
-// OpenAI 协议 types（openai-to-anthropic 转换用）
+// OpenAI protocol types (used by openai-to-anthropic conversion)
 // ============================================================================
 
 export interface OpenAIMessage {

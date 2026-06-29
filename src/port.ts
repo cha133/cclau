@@ -1,4 +1,4 @@
-// 顺序端口探测：起 3133，占了 +1 顺延
+// Sequential port probe: start at 3133, +1 on conflict
 
 async function isPortFree(port: number): Promise<boolean> {
   try {

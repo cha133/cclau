@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 // cclau - Claude Code launcher
 //
-// 5 层路由（详见 .claude/02-cli-routing.md）：
-//   1. 无参 → launch default profile
-//   2. -h/--help 单独首参 → cclau help（拦截 cc help）
-//   3. 首参以 - 开头 → launch default + 透传所有 argv 给 claude
-//   4. 已知子命令 → commander
-//   5. 其余 → fuzzy match profile + 透传剩余 args 给 claude
+// 5-layer routing (see .claude/02-cli-routing.md):
+//   1. no args             → launch default profile
+//   2. -h / --help alone   → cclau help (intercepts cc help)
+//   3. -X                  → launch default + passthrough all argv to claude
+//   4. known subcommand    → commander
+//   5. otherwise           → fuzzy match profile + passthrough remaining args
 
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
@@ -18,10 +18,10 @@ import { launchCmd, launchDefault } from "./commands/launch.js";
 import { rmCmd } from "./commands/rm.js";
 import { showCmd } from "./commands/show.js";
 
-// commander 已知子命令。增减只改这一处。
-// 最终名单（详见 .claude/02-cli-routing.md § 规则 4）：
+// commander-known subcommands. Add or remove here only.
+// Final list (see .claude/02-cli-routing.md § rule 4):
 //   add edit rm remove ls list show default help version
-// 已删：doctor models alias switch profile（及其子命令组）
+// Removed: doctor models alias switch profile (and its subcommand group)
 const KNOWN_SUBCOMMANDS = new Set([
   "add",
   "edit",
@@ -80,42 +80,42 @@ program
     showCmd(name);
   });
 
-// nvm 风格的 default 子命令组（详见 src/commands/default.ts）
+// nvm-style default subcommand group (see src/commands/default.ts)
 registerDefault(program);
 
 // ============================================================================
-// main 路由
+// main routing
 // ============================================================================
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const firstArg = argv[0];
 
-  // 规则 1：无参 → launch default
+  // rule 1: no args → launch default
   if (firstArg === undefined) {
     await launchDefault([]);
     return;
   }
 
-  // 规则 2：-h / --help 单独首参 → cclau help（拦截 cc help）
+  // rule 2: -h / --help as the only arg → cclau help (intercepts cc help)
   if ((firstArg === "-h" || firstArg === "--help") && argv.length === 1) {
     program.parse(process.argv);
     return;
   }
 
-  // 规则 3：首参以 - 开头 → launch default + 透传给 claude
+  // rule 3: -X → launch default + passthrough
   if (firstArg.startsWith("-")) {
     await launchDefault(argv);
     return;
   }
 
-  // 规则 4：已知子命令 → commander
+  // rule 4: known subcommand → commander
   if (KNOWN_SUBCOMMANDS.has(firstArg)) {
     program.parse(process.argv);
     return;
   }
 
-  // 规则 5：fuzzy match profile + 透传剩余 args
+  // rule 5: fuzzy match profile + passthrough remaining args
   await launchCmd(firstArg, argv.slice(1));
 }
 

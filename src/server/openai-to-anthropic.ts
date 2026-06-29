@@ -1,5 +1,5 @@
-// OpenAI Chat Completions ↔ Anthropic Messages 双向转换（v0 直转，无中间层）
-// 用于 convert 模式：upstream 是 openai chat 协议
+// OpenAI Chat Completions ↔ Anthropic Messages two-way conversion (v0 direct, no intermediate layer)
+// Used by convert mode: upstream speaks OpenAI Chat protocol
 
 import type {
   AnthropicContentBlock,
@@ -30,7 +30,7 @@ interface UpstreamCtx {
 export function anthropicToOpenAI(req: AnthropicRequest, upstreamModel: string): OpenAIRequest {
   const messages: OpenAIMessage[] = [];
 
-  // system → 顶层 system 消息
+  // system → top-level system message
   if (typeof req.system === "string" && req.system) {
     messages.push({ role: "system", content: req.system });
   } else if (Array.isArray(req.system)) {
@@ -48,7 +48,7 @@ export function anthropicToOpenAI(req: AnthropicRequest, upstreamModel: string):
       continue;
     }
 
-    // 块数组：拆成多条消息
+    // block array: split into multiple messages
     const textParts: string[] = [];
     const toolUses: { id: string; name: string; input: string }[] = [];
     const toolResults: { tool_use_id: string; content: string; is_error?: boolean }[] = [];
@@ -74,7 +74,7 @@ export function anthropicToOpenAI(req: AnthropicRequest, upstreamModel: string):
           is_error: block.is_error,
         });
       }
-      // thinking / image: v0 跳过
+      // thinking / image: v0 skipped
     }
 
     if (textParts.length > 0 || toolUses.length > 0) {
@@ -136,7 +136,7 @@ export function anthropicToOpenAI(req: AnthropicRequest, upstreamModel: string):
 }
 
 // ============================================================================
-// Response: OpenAI → Anthropic（非流式）
+// Response: OpenAI → Anthropic (non-streaming)
 // ============================================================================
 
 export function openAIToAnthropic(
@@ -158,7 +158,7 @@ export function openAIToAnthropic(
       try {
         input = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
       } catch {
-        // 参数解析失败，留空对象（不阻断）
+        // parameter parse failure: keep empty object, don't abort
       }
       content.push({
         type: "tool_use",
@@ -205,7 +205,7 @@ function mapFinishReason(reason: OpenAIResponse["choices"][number]["finish_reaso
 // ============================================================================
 
 /**
- * 流式响应状态机：跟踪当前打开的 content block
+ * Streaming response state machine: tracks the currently open content block.
  */
 class StreamState {
   messageStarted = false;
@@ -230,13 +230,10 @@ export async function* convertOpenAIStreamToAnthropic(
 ): AsyncGenerator<string, void, void> {
   const state = new StreamState();
   state.model = requestedModel;
-  let buf = ""; // OpenAI SSE 数据缓冲
 
-  // 先发 message_start
+  // emit message_start first
   state.messageStarted = true;
   state.messageId = `msg_${Date.now()}`;
-  // buf 保留给未来 chunk 重组（v0 直接逐 chunk 处理，不需要）
-  void buf;
   yield newSseEvent("message_start", {
     type: "message_start",
     message: {
@@ -261,7 +258,7 @@ export async function* convertOpenAIStreamToAnthropic(
     // text delta
     if (delta.content) {
       if (state.currentBlockType !== "text") {
-        // 关闭前一个 block（如有），开新 text block
+        // close previous block (if any), open new text block
         if (state.currentBlockIdx >= 0) {
           yield newSseEvent("content_block_stop", {
             type: "content_block_stop",
@@ -287,7 +284,7 @@ export async function* convertOpenAIStreamToAnthropic(
     if (delta.tool_calls && delta.tool_calls.length > 0) {
       for (const tc of delta.tool_calls) {
         if (tc.id && tc.function?.name) {
-          // 新 tool call 开始
+          // new tool call begins
           if (state.currentBlockIdx >= 0) {
             yield newSseEvent("content_block_stop", {
               type: "content_block_stop",
@@ -310,7 +307,7 @@ export async function* convertOpenAIStreamToAnthropic(
             },
           });
         } else if (tc.function?.arguments) {
-          // 同一个 tool call 的参数增量
+          // incremental arguments for the same tool call
           state.currentToolArgs += tc.function.arguments;
           yield newSseEvent("content_block_delta", {
             type: "content_block_delta",
@@ -326,14 +323,13 @@ export async function* convertOpenAIStreamToAnthropic(
 
     // finish_reason
     if (choice.finish_reason) {
-      // 关闭最后一个 block
+      // close the last block
       if (state.currentBlockIdx >= 0) {
         yield newSseEvent("content_block_stop", {
           type: "content_block_stop",
           index: state.currentBlockIdx,
         });
       }
-      // 估算 token（v0 简单：上游给就用，没给就 0）
       yield newSseEvent("message_delta", {
         type: "message_delta",
         delta: {
@@ -369,12 +365,13 @@ export async function handleConvert(req: AnthropicRequest, ctx: UpstreamCtx): Pr
   }
 
   const upstreamBody = (await upstreamRes.json()) as OpenAIResponse;
-  // anthropic-out 整流（虽然 v0 通常是 no-op，但保持接口一致）
+  // anthropic-out rectification (v0: usually no-op, but keep interface consistent)
   const outTransformed = applyRectifier(
-    { anthropic: undefined }, // v0：convert 模式不带 anthropic 整流配置
+    { anthropic: undefined }, // v0: convert mode carries no anthropic rectifier
     { phase: "anthropic-out", payload: null },
   );
-  // 注：实际上 convert 模式上游返回 OpenAI，无 anthropic 整流需求；接口留着对齐
+  // Note: convert mode actually gets OpenAI responses back, no anthropic rectification needed;
+  // keeping the interface call for alignment
   void outTransformed;
 
   return openAIToAnthropic(upstreamBody, req.model);
@@ -404,7 +401,7 @@ export async function* handleConvertStream(
     throw new UpstreamError(500, "upstream returned no body");
   }
 
-  // 把 OpenAI SSE bytes 转成 chunk 对象
+  // Convert OpenAI SSE bytes into chunk objects
   const reader = upstreamRes.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -414,7 +411,7 @@ export async function* handleConvertStream(
       return {
         async next(): Promise<IteratorResult<OpenAIStreamChunk>> {
           while (true) {
-            // 先看 buffer 里有没有完整的 SSE event
+            // first check if buffer has a complete SSE event
             const idx = buffer.indexOf("\n\n");
             if (idx >= 0) {
               const block = buffer.slice(0, idx);
@@ -435,7 +432,7 @@ export async function* handleConvertStream(
                 continue;
               }
             }
-            // buffer 里没完整 event → 读更多
+            // no complete event in buffer → read more
             const { done, value } = await reader.read();
             if (done) {
               if (buffer.trim()) {

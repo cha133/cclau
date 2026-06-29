@@ -1,7 +1,7 @@
-// cclau ls - 列出所有 profile
+// cclau ls - list all profiles
 //
-// refactor 之后：单 profile 概念，ls 只渲染 profile 表。
-// 想看 model 详情用 `cclau show <name>`。
+// refactored: single profile concept, ls renders only the profile table.
+// Use `cclau show <name>` for details.
 
 import { listProfiles } from "../config.js";
 import { pc } from "../utils/logger.js";
@@ -11,7 +11,7 @@ import { formatModelWith1m } from "../core/model-1m.js";
 export function listCmd(): void {
   const profiles = listProfiles();
   if (profiles.length === 0) {
-    console.log(`${pc.cyan("ℹ")}  暂无 profile。运行 \`cclau add\` 添加一个。`);
+    console.log(`${pc.cyan("ℹ")}  no profiles yet. run \`cclau add\` to create one.`);
     return;
   }
 

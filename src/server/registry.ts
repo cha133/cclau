@@ -1,24 +1,24 @@
-// sidecar 路由注册表
+// sidecar routing registry
 //
-// refactor 之后：单 profile 概念，registry 只装 1 条 entry。
-// key = strip1m(profile.model) —— claude-code 内部 normalizeModelStringForAPI
-// 剥掉 [1m] 后缀（见 src/core/model-1m.ts 顶部注释），所以 sidecar 收到的是
-// 已经剥过的字符串，registry 必须按剥后形态匹配。
+// refactored: single profile concept, registry holds exactly 1 entry.
+// key = strip1m(profile.model) — claude-code's normalizeModelStringForAPI
+// strips the [1m] suffix (see src/core/model-1m.ts top comment), so the sidecar
+// receives the already-stripped string and the registry must match on that form.
 //
-// 跨 provider 消歧不再需要 —— 每个 profile 自带 endpoint + apiKey + model，
-// 不会有跨 profile 同 model 的歧义（profile 名就是 namespace）。
+// Cross-provider disambiguation is no longer needed — each profile carries its own
+// endpoint + apiKey + model, no ambiguity across profiles (profile name is the namespace).
 
 import type { Mode, Profile, Rectifier } from "../types.js";
 import { strip1m } from "../core/model-1m.js";
 
 export interface RouteEntry {
-  /** 已 strip 末尾 / */
+  /** trailing / stripped */
   endpoint: string;
   apiKey: string;
   mode: Mode;
-  /** 透传给上游的 model id（裸 base name） */
+  /** model id passed through to upstream (bare base name) */
   model: string;
-  /** 仅 rectify 模式挂载；direct / openai 模式下为 undefined */
+  /** only mounted in rectify mode; undefined in direct / openai modes */
   rectifier?: Rectifier;
 }
 
@@ -32,8 +32,8 @@ export class RegistryBuildError extends Error {
 }
 
 /**
- * 从单 profile 构建 registry（仅 1 条 entry）。
- * key = strip1m(profile.model)。
+ * Build registry from a single profile (always exactly 1 entry).
+ * key = strip1m(profile.model).
  */
 export function buildRegistry(profile: Profile): Registry {
   const reg: Registry = new Map();
@@ -43,7 +43,7 @@ export function buildRegistry(profile: Profile): Registry {
     mode: profile.mode,
     model: profile.model,
   };
-  // 仅 rectify 模式挂 rectifier；direct / openai 不挂
+  // mount rectifier only in rectify mode; direct / openai skip it
   if (profile.mode === "rectify" && profile.rectifier) {
     entry.rectifier = profile.rectifier;
   }

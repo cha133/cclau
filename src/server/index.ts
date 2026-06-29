@@ -1,8 +1,8 @@
-// cclau 本地 sidecar HTTP server
-// 按 body.model 查 registry 路由 → 按 entry.mode 分发：
-//   direct   → passthrough（rectifier 为空，纯透传）
-//   rectify  → passthrough（挂 entry.rectifier）
-//   openai   → openai-to-anthropic（用 entry.model 作为上游 model id）
+// cclau local sidecar HTTP server
+// Routes by body.model → registry → entry.mode:
+//   direct   → passthrough (no rectifier, pure forward)
+//   rectify  → passthrough (mounts entry.rectifier)
+//   openai   → openai-to-anthropic (uses entry.model as upstream model id)
 
 import type { AnthropicRequest, AnthropicStreamEvent, Rectifier } from "../types.js";
 import { passthroughStream, passthroughUnary, UpstreamError } from "./anthropic-passthrough.js";
@@ -18,9 +18,9 @@ export interface ServerHandle {
 }
 
 /**
- * 启动 cclau sidecar server
- * @param registry model id → RouteEntry 的路由表（buildRegistry 产出）
- * @param port 监听端口（已通过 findFreePort 取得）
+ * Start the cclau sidecar server
+ * @param registry model id → RouteEntry routing table (from buildRegistry)
+ * @param port listening port (obtained via findFreePort)
  */
 export function startServer(registry: Registry, port: number): ServerHandle {
   const server = Bun.serve({
@@ -31,12 +31,12 @@ export function startServer(registry: Registry, port: number): ServerHandle {
     async fetch(req): Promise<Response> {
       const url = new URL(req.url);
 
-      // 健康检查
+      // health check
       if (url.pathname === "/healthz") {
         return new Response("ok", { status: 200 });
       }
 
-      // 唯一对外端点
+      // the one external endpoint
       if (url.pathname === "/v1/messages" && req.method === "POST") {
         return handleMessages(req, registry);
       }
@@ -69,8 +69,8 @@ async function handleMessages(req: Request, registry: Registry): Promise<Respons
     return errorResponse(400, `invalid json: ${(err as Error).message}`);
   }
 
-  // claude-code 内部 normalizeModelStringForAPI 已剥 [1m]，registry key 形如 strip1m(model)。
-  // 直接按 key 查 —— body.model 是 `model[1m]` 或 `model`，strip 后命中。
+  // claude-code's normalizeModelStringForAPI has stripped [1m]; registry key is strip1m(model).
+  // Look up by key directly — body.model is either `model[1m]` or `model`, matches after strip.
   const key = strip1m(body.model);
   const entry = registry.get(key);
   if (!entry) {
@@ -84,7 +84,7 @@ async function handleMessages(req: Request, registry: Registry): Promise<Respons
 
   try {
     if (entry.mode === "openai") {
-      // openai ↔ anthropic（convert 模式）
+      // openai ↔ anthropic (convert mode)
       const ctx = { endpoint: entry.endpoint, apiKey: entry.apiKey, model: entry.model };
       if (wantStream) {
         return streamAnthropicSse(handleConvertStream(body, ctx));
@@ -93,8 +93,8 @@ async function handleMessages(req: Request, registry: Registry): Promise<Respons
       return Response.json(resp);
     }
 
-    // direct / rectify → anthropic 透传 + （可选）整流
-    // body.model 与 entry.model 同形（已 strip [1m]），无需 override
+    // direct / rectify → anthropic passthrough + (optional) rectifier
+    // body.model matches entry.model (already stripped of [1m]), no override needed
     const ctx = { endpoint: entry.endpoint, apiKey: entry.apiKey };
     const rect: Rectifier = entry.rectifier ?? {};
     if (wantStream) {

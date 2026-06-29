@@ -1,5 +1,5 @@
-// Anthropic Messages → Anthropic Messages 透传 + 整流
-// 用于 rectify 模式：upstream 是 anthropic 协议
+// Anthropic Messages → Anthropic Messages passthrough + rectifier
+// Used by rectify mode: upstream speaks anthropic protocol
 
 import type { AnthropicRequest, AnthropicResponse, AnthropicStreamEvent, Rectifier } from "../types.js";
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
@@ -12,20 +12,20 @@ interface UpstreamCtx {
 }
 
 /**
- * 直传 anthropic 请求到上游，返回响应（非流式）
+ * Forward an anthropic request to upstream and return the response (non-streaming).
  */
 export async function passthroughUnary(
   rect: Rectifier,
   req: AnthropicRequest,
   ctx: UpstreamCtx,
 ): Promise<AnthropicResponse> {
-  // anthropic-in 整流
+  // anthropic-in rectification
   const transformed = applyRectifier(rect, {
     phase: "anthropic-in",
     payload: req,
   }) as AnthropicRequest;
 
-  // 透传到上游
+  // forward to upstream
   const presetHeaders = resolvePresetHeaders(rect.anthropic, ctx.apiKey);
   const upstreamRes = await fetch(buildUpstreamUrl(ctx.endpoint, "anthropic"), {
     method: "POST",
@@ -45,7 +45,7 @@ export async function passthroughUnary(
 
   const upstreamBody = (await upstreamRes.json()) as AnthropicResponse;
 
-  // anthropic-out 整流
+  // anthropic-out rectification
   const outTransformed = applyRectifier(rect, {
     phase: "anthropic-out",
     payload: upstreamBody,
@@ -55,7 +55,7 @@ export async function passthroughUnary(
 }
 
 /**
- * 透传并流式返回 anthropic SSE 事件
+ * Forward and stream anthropic SSE events.
  */
 export async function* passthroughStream(
   rect: Rectifier,
@@ -98,7 +98,7 @@ export async function* passthroughStream(
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE 解析：按 \n\n 切 event
+      // SSE parse: split on \n\n event boundaries
       let idx: number;
       while ((idx = buffer.indexOf("\n\n")) >= 0) {
         const block = buffer.slice(0, idx);
@@ -107,19 +107,19 @@ export async function* passthroughStream(
         const lines = block.split("\n");
         const dataLines: string[] = [];
         for (const line of lines) {
-          // 只取 data 行；event: 头忽略（Anthropic SSE 的 event 名跟 data.type 一致，
-          // data.type 是真实事件类型，event: 头是历史遗留）
+          // only take data: lines; ignore event: headers (Anthropic SSE event names match data.type,
+          // the event: header is legacy)
           if (line.startsWith("data: ")) dataLines.push(line.slice(6));
         }
         if (dataLines.length === 0) continue;
 
         try {
           const data = JSON.parse(dataLines.join("\n")) as AnthropicStreamEvent;
-          // v1：调 streamChunkTransform（之前 v0 漏调）
+          // v1: actually call streamChunkTransform (v0 missed this)
           const events = applyStreamRectifier(rect, [data]);
           yield (events[0] ?? data) as AnthropicStreamEvent;
         } catch (err) {
-          // 解析失败的 chunk 跳过（keep-alive 或 ping）
+          // skip parse failures (keep-alive or ping)
           continue;
         }
       }

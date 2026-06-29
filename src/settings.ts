@@ -1,11 +1,11 @@
-// 生成注入给 claude code 的 settings JSON
-// 通过 `claude --settings <file>` 临时传入，不修改 ~/.claude/settings.json
+// Generate settings JSON injected into claude code via `claude --settings <file>`.
+// Temporary file path; ~/.claude/settings.json is never modified.
 //
-// refactor 之后：单 profile 概念，4 个 ANTHROPIC_DEFAULT_*_MODEL env 全写同一个 model（apply1m 后）。
-// sidecar 决策据 profile.mode：
-//   direct  → 零 hop（ANTHROPIC_BASE_URL = profile.endpoint）
-//   rectify → sidecar + 整流钩子（profile.rectifier 挂载）
-//   openai  → sidecar + openai ↔ anthropic 转换
+// refactored: single profile concept, 4 ANTHROPIC_DEFAULT_*_MODEL envs all hold the same model.
+// sidecar decision based on profile.mode:
+//   direct  → zero-hop (ANTHROPIC_BASE_URL = profile.endpoint)
+//   rectify → sidecar + rectifier hooks (profile.rectifier mounted)
+//   openai  → sidecar + openai ↔ anthropic protocol conversion
 
 import { randomUUID } from "node:crypto";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
@@ -20,13 +20,13 @@ export interface SettingsFile {
 }
 
 export interface LaunchResolution {
-  /** claude-code 写到 4 个 ANTHROPIC_DEFAULT_*_MODEL env 的 model id（已 apply1m） */
+  /** model id written by claude-code to the 4 ANTHROPIC_DEFAULT_*_MODEL envs (apply1m applied) */
   settingsModel: string;
-  /** 透传给上游的 model id（base name，无 [1m]，无前缀） */
+  /** model id passed through to upstream (base name, no [1m], no prefix) */
   upstreamModel: string;
   sidecar: {
     needed: boolean;
-    /** 给人看的决策原因，比如 "mode: rectify" */
+    /** human-readable decision reason, e.g. "mode: rectify" */
     reason?: string;
   };
 }
@@ -39,18 +39,18 @@ export class ProfileResolutionError extends Error {
 }
 
 /**
- * 解析 profile → launch 决策。
- * 任何必要字段缺失都抛错。
+ * Resolve profile → launch decision.
+ * Throws when any required field is missing.
  */
 export function resolveLaunch(profile: Profile): LaunchResolution {
   if (!profile.endpoint) {
-    throw new ProfileResolutionError(`profile "${profile.name}" 缺少 endpoint`);
+    throw new ProfileResolutionError(`profile "${profile.name}" missing endpoint`);
   }
   if (!profile.apiKey) {
-    throw new ProfileResolutionError(`profile "${profile.name}" 缺少 apiKey`);
+    throw new ProfileResolutionError(`profile "${profile.name}" missing apiKey`);
   }
   if (!profile.model) {
-    throw new ProfileResolutionError(`profile "${profile.name}" 缺少 model`);
+    throw new ProfileResolutionError(`profile "${profile.name}" missing model`);
   }
 
   const sidecar = computeSidecarNeed(profile);
@@ -76,11 +76,11 @@ function computeSidecarNeed(profile: Profile): {
 }
 
 /**
- * 写 settings JSON 到临时文件并返回 cleanup handle。
+ * Write settings JSON to a temporary file and return the cleanup handle.
  *
- * @param profile 当前激活的 profile
- * @param port 直连模式传 undefined（baseUrl = profile.endpoint 真零 hop）；
- *            sidecar 模式传本地 server 端口（baseUrl = http://127.0.0.1:port）
+ * @param profile the active profile
+ * @param port direct mode: undefined (baseUrl = profile.endpoint, true zero-hop);
+ *             sidecar mode: local server port (baseUrl = http://127.0.0.1:port)
  */
 export async function writeSettingsFile(
   profile: Profile,
@@ -93,8 +93,8 @@ export async function writeSettingsFile(
       ? `http://127.0.0.1:${port}`
       : profile.endpoint;
 
-  // [1m] 是 claude-code 的内部 hint（见 src/core/model-1m.ts 顶部注释）。
-  // resolveLaunch 已经调过 apply1m，所以这里 4 个 var 都是「base[1m]」或「base」。
+  // [1m] is claude-code's internal hint (see src/core/model-1m.ts top comment).
+  // resolveLaunch has already called apply1m, so all 4 vars here are "base[1m]" or "base".
   const settings = {
     env: {
       ANTHROPIC_BASE_URL: baseUrl,
@@ -118,7 +118,7 @@ export async function writeSettingsFile(
       try {
         await unlink(filepath);
       } catch {
-        // 文件已被删，忽略
+        // already deleted, ignore
       }
     },
   };

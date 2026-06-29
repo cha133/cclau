@@ -1,12 +1,13 @@
 // ============================================================================
 // cclau default [name] [--unset]
 //
-// nvm 风格：
-//   cclau default              —— 显示当前 default profile
-//   cclau default <name>       —— 设为 default（fuzzy 匹配）
-//   cclau default --unset      —— 取消所有 default
+// nvm-style:
+//   cclau default              -- show current default profile
+//   cclau default <name>       -- set as default (fuzzy match)
+//   cclau default --unset      -- unset all defaults
 //
-// 配置文件层只允许一个 default。设新 default 时自动清掉其他 profile 的 default 标志。
+// Config layer allows exactly one default. Setting a new default automatically
+// clears the default flag on all other profiles.
 // ============================================================================
 
 import { Command } from "commander";
@@ -45,21 +46,21 @@ function showDefault(): void {
   const defaults = all.filter((p) => p.default === true);
 
   if (defaults.length > 1) {
-    // 配置脏：多 default。让用户清。
-    console.log(pc.red(`错误：多个 profile 都标了 default：`));
+    // Config is dirty: multiple defaults. Ask the user to clean up.
+    console.log(pc.red(`error: multiple profiles marked as default:`));
     for (const prof of defaults) {
       console.log(pc.dim(`  - ${prof.name}`));
     }
     console.log(
-      pc.dim(`运行 ${pc.cyan("`cclau default <name>`")} 重设一个，或 ${pc.cyan("`cclau edit <name>`")} 取消多余 default。`),
+      pc.dim(`run ${pc.cyan("`cclau default <name>`")} to set one, or ${pc.cyan("`cclau edit <name>`")} to clear extras.`),
     );
     return;
   }
 
   const def = getDefaultProfile();
   if (!def) {
-    console.log(pc.dim("(无 default profile)"));
-    console.log(pc.dim(`运行 ${pc.cyan("`cclau default <name>`")} 设定。`));
+    console.log(pc.dim("(no default profile)"));
+    console.log(pc.dim(`run ${pc.cyan("`cclau default <name>`")} to set one.`));
     return;
   }
 
@@ -71,20 +72,20 @@ function showDefault(): void {
 async function setDefault(name: string): Promise<void> {
   const profiles = listProfiles();
   if (profiles.length === 0) {
-    p.log.error(`暂无 profile。先运行 ${pc.cyan("`cclau add`")} 创建一个。`);
+    p.log.error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
     process.exit(1);
   }
 
   const top = fuzzyTopN(name, profiles.map((p) => p.name), 2);
   if (top.length === 0) {
     p.log.error(
-      `没有匹配到 profile "${name}"。现有: ${profiles.map((p) => p.name).join(", ")}`,
+      `no profile matched "${name}". existing: ${profiles.map((p) => p.name).join(", ")}`,
     );
     process.exit(1);
   }
   if (isAmbiguous(top)) {
     p.log.error(
-      `"${name}" 模糊匹配到多个 profile: ${top.map((s) => s.name).join("、")}。请用更精确名字。`,
+      `"${name}" ambiguously matches multiple profiles: ${top.map((s) => s.name).join(", ")}. please use a more specific name.`,
     );
     process.exit(1);
   }
@@ -92,11 +93,11 @@ async function setDefault(name: string): Promise<void> {
 
   const target = getProfile(resolved);
   if (!target) {
-    p.log.error(`profile "${resolved}" 不存在`);
+    p.log.error(`profile "${resolved}" does not exist`);
     process.exit(1);
   }
 
-  // 清掉其他 default（保证配置层只有一个）
+  // Clear other defaults (enforce single default at config layer)
   for (const prof of profiles) {
     if (prof.name !== resolved && prof.default === true) {
       const updated: typeof prof = { ...prof };
@@ -107,7 +108,7 @@ async function setDefault(name: string): Promise<void> {
   }
 
   if (target.default === true) {
-    p.log.info(`"${resolved}" 已是 default`);
+    p.log.info(`"${resolved}" is already default`);
     return;
   }
 
@@ -124,7 +125,7 @@ async function unsetDefault(): Promise<void> {
   const profiles = listProfiles();
   const defaults = profiles.filter((p) => p.default === true);
   if (defaults.length === 0) {
-    p.log.info("(无 default profile 需要 unset)");
+    p.log.info("(no default profile to unset)");
     return;
   }
 
@@ -136,10 +137,10 @@ async function unsetDefault(): Promise<void> {
   }
 
   if (defaults.length === 1) {
-    p.log.success(`✓ 已取消 default "${defaults[0]!.name}"`);
+    p.log.success(`✓ cleared default "${defaults[0]!.name}"`);
   } else {
     p.log.success(
-      `✓ 已取消 ${defaults.length} 个 default profile: ${defaults.map((d) => d.name).join(", ")}`,
+      `✓ cleared ${defaults.length} default profiles: ${defaults.map((d) => d.name).join(", ")}`,
     );
   }
 }

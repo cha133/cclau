@@ -1,4 +1,4 @@
-// spawn claude + 信号转发
+// Spawn claude + signal forwarding
 
 import { spawn, type Subprocess } from "bun";
 import * as p from "@clack/prompts";
@@ -10,8 +10,8 @@ export interface ClaudeProcess {
 }
 
 /**
- * 启动 `claude --settings <file> [args...]`
- * 透传 stdin/stdout/stderr，Ctrl-C 时同步转发给 claude 子进程
+ * Launch `claude --settings <file> [args...]`
+ * Pipes stdin/stdout/stderr through. Ctrl-C forwards synchronously to the claude child.
  */
 export function spawnClaude(settings: SettingsFile, args: string[]): ClaudeProcess {
   const proc = spawn({
@@ -22,7 +22,7 @@ export function spawnClaude(settings: SettingsFile, args: string[]): ClaudeProce
     env: process.env,
   });
 
-  // 信号转发：父进程收到 SIGINT/SIGTERM/SIGBREAK 时同步发给 claude
+  // Signal forwarding: parent SIGINT/SIGTERM/SIGBREAK → child claude
   const forward = (sig: NodeJS.Signals | "SIGBREAK") => {
     if (!proc.killed) {
       try {
@@ -34,7 +34,7 @@ export function spawnClaude(settings: SettingsFile, args: string[]): ClaudeProce
   };
   process.on("SIGINT", forward);
   process.on("SIGTERM", forward);
-  // Windows 特有：Ctrl-Break
+  // Windows-specific: Ctrl-Break
   process.on("SIGBREAK", forward);
 
   const exited = proc.exited.then(async (code) => {

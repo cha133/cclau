@@ -1,7 +1,7 @@
-// TOML 配置读写
+// TOML config read/write
 //
-// 重构后只剩一张表：profiles。每条 profile 自带 endpoint / apiKey / mode / model / supports1m。
-// Provider / multi-tier / alias 全部删。
+// Refactored: a single `profiles` table. Each profile carries endpoint / apiKey / mode / model / supports1m.
+// Provider / multi-tier / alias all deleted.
 
 import { writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -85,9 +85,10 @@ export function listProfileNames(): string[] {
 }
 
 /**
- * 返回 default === true 的第一个 profile。找不到返 undefined。
+ * Returns the first profile with default === true, or undefined.
  *
- * 多 default 的报错不在这里做 —— 配置层只读字段，UX 在 launch 时（Phase 4）。
+ * Multi-default validation is NOT done here — the config layer is just a read/write
+ * of fields; the UX error belongs at launch time (Phase 4).
  */
 export function getDefaultProfile(): Profile | undefined {
   return listProfiles().find((p) => p.default === true);

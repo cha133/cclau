@@ -1,12 +1,12 @@
-// 内置 vendor preset
+// Built-in vendor presets
 //
-// refactor 后：vendor preset 只预填 endpoint + mode + 提示，model 由 wizard fetch。
-// Mode 含义：
-//   direct   - anthropic 直连（最快，无 sidecar）
-//   rectify  - anthropic 直连 + 整流钩子（走 sidecar）
-//   openai   - openai chat → anthropic 转换（走 sidecar）
+// refactored: vendor preset only prefills endpoint + mode + hint; model is fetched in wizard.
+// Mode meanings:
+//   direct   - anthropic direct (fastest, no sidecar)
+//   rectify  - anthropic direct + rectifier hooks (via sidecar)
+//   openai   - openai chat → anthropic conversion (via sidecar)
 //
-// Custom preset：用户手填 endpoint + mode。
+// Custom preset: user fills endpoint + mode.
 
 import type { Mode } from "./types.js";
 
@@ -51,8 +51,8 @@ export function findPreset(name: string): BuiltinPreset | undefined {
 
 export const CUSTOM_PRESET: BuiltinPreset = {
   name: "custom",
-  label: "自定义",
+  label: "Custom",
   endpoint: "",
   defaultMode: "direct",
-  hint: "自填 endpoint / mode",
+  hint: "fill in endpoint / mode manually",
 };
