@@ -97,8 +97,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  // rule 2: -h / --help as the only arg → cclau help (intercepts cc help)
-  if ((firstArg === "-h" || firstArg === "--help") && argv.length === 1) {
+  // rule 2: -h / --help / -v / --version as the only arg → cclau help / version.
+  // Intercepts these so users see cclau's own help/version (use `cc -h` / `cc -v`
+  // for Claude Code's). Add more here if cclau needs its own flag that collides
+  // with claude's.
+  const INTERCEPT_FLAGS = new Set(["-h", "--help", "-v", "--version"]);
+  if (INTERCEPT_FLAGS.has(firstArg) && argv.length === 1) {
     program.parse(process.argv);
     return;
   }
