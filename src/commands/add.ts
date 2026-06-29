@@ -273,10 +273,30 @@ export async function addCmd(): Promise<void> {
 
   await upsertProfile(profile);
 
+  // Auto-default: if no other profile is the default, promote the new one.
+  // Rationale: first profile added → make it default so `cclau` (no args) works
+  // immediately, no need to run `cclau default <name>` separately. Subsequent
+  // adds don't auto-default — user picks explicitly via `cclau default <name>`.
+  let autoDefaulted = false;
+  const allAfter = listProfiles();
+  const hasAnotherDefault = allAfter.some(
+    (p) => p.name !== profile.name && p.default === true,
+  );
+  if (!hasAnotherDefault && profile.default !== true) {
+    const updated: Profile = {
+      ...profile,
+      default: true,
+      updatedAt: Date.now(),
+    };
+    await upsertProfile(updated);
+    autoDefaulted = true;
+  }
+
   const rectHint = profile.rectifier ? " (rectifier enabled)" : "";
+  const defaultHint = autoDefaulted ? " (auto-set as default)" : "";
   p.outro(
     pc.green(
-      `✓ added profile "${name}" (${mode}, model: ${model}${rectHint})`,
+      `✓ added profile "${name}" (${mode}, model: ${model}${rectHint}${defaultHint})`,
     ),
   );
   p.log.message(

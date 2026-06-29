@@ -111,6 +111,12 @@ requestHeaders = { Authorization = "Bearer __CCLAU_BEARER_APIKEY__" }
 
 Set `supports1m = true` and Claude Code will use the 1M context window when given a flag like `--context 1m`. The `[1m]` marker is a Claude Code internal hint and is stripped before the request leaves the sidecar — upstream never sees it.
 
+## Behavior notes
+
+- **First profile added becomes the default automatically** — `cclau` (no args) works immediately after `cclau add`. Subsequent adds do NOT auto-default; pick explicitly with `cclau default <name>`.
+- **Removing the current default profile auto-promotes the next one** (alphabetical, first by name) so `cclau` keeps working. If you remove the last profile, the default is cleared — add a new one and run `cclau default <name>` to set it.
+- **Profile fields not specified in the wizard are left at their default** — `add` always sets `supports1m` and `mode`; `edit` lets you change any of `endpoint / apiKey / mode / model / supports1m / default`. To tweak things the wizard doesn't expose, hand-edit the TOML.
+
 ## Development
 
 ```bash
