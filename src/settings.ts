@@ -78,6 +78,17 @@ function computeSidecarNeed(profile: Profile): {
 /**
  * Write settings JSON to a temporary file and return the cleanup handle.
  *
+ * IMPORTANT: relies on Claude Code's deep-merge behavior for `--settings <file>`
+ * (see claude-code src/utils/settings/settings.ts: settingsMergeCustomizer +
+ * lodash mergeWith, applied in source order userSettings → projectSettings →
+ * localSettings → flagSettings → policySettings). Our temp file only writes
+ * `env: { 6 ANTHROPIC_* keys }`; all other fields (permissions, hooks,
+ * mcpServers, other env vars, ...) deep-merge through from the user's global
+ * ~/.claude/settings.json. Arrays like `permissions.allow` concatenate + dedup.
+ * Do NOT add fields here intending to "reset" global state — deep merge means
+ * we'd just lose the global value. To override a global field, set it explicitly
+ * in this file's `env` (or other nested object) — it will overwrite via merge.
+ *
  * @param profile the active profile
  * @param port direct mode: undefined (baseUrl = profile.endpoint, true zero-hop);
  *             sidecar mode: local server port (baseUrl = http://127.0.0.1:port)
