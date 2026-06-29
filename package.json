@@ -1,6 +1,6 @@
 {
   "name": "cclau",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Claude Code launcher with subscription manager and protocol conversion",
   "type": "module",
   "main": "./src/cli.ts",
