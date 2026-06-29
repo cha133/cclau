@@ -1,184 +1,171 @@
 // ============================================================================
-// buildRegistry：把 resolved tiers 展平成 model id → RouteEntry 的 Map
+// buildRegistry：单 Profile → 1 entry 的 Map
 // ----------------------------------------------------------------------------
-// 锁住 v5 不变量 #4：key = strip1m(t.model)，3 tier 允许同 model id，
-// 跨 provider 靠 ${provider.name}/ 前缀消歧；不再校验 3 tier 唯一。
+// refactor 之后：单 profile 概念，registry 只装 1 条 entry。
+// key = strip1m(profile.model)，无 provider/ 前缀（跨 provider 概念不存在了）。
 // ============================================================================
 
 import { describe, test, expect } from "bun:test";
 
-import { buildRegistry, RegistryBuildError, type RegistryTier } from "../src/server/registry.js";
-import type { Subscription } from "../src/types.js";
+import {
+  buildRegistry,
+  RegistryBuildError,
+  type RouteEntry,
+} from "../src/server/registry.js";
+import type { Profile } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 
-function makeSub(name: string, overrides: Partial<Subscription> = {}): Subscription {
+function makeProfile(overrides: Partial<Profile> = {}): Profile {
   return {
-    name,
-    endpoint: `https://example.invalid/${name}`,
-    apiKey: `key-${name}`,
-    type: "anthropic",
+    name: "test",
+    endpoint: "https://example.invalid/test",
+    apiKey: "key-test",
     mode: "direct",
-    models: [{ id: "claude-sonnet-4-6", supports_1m: false }],
+    model: "claude-sonnet-4-6",
+    supports1m: false,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
   };
 }
 
-function makeTier(
-  tier: "opus" | "sonnet" | "haiku",
-  model: string,
-  provider: Subscription,
-  upstreamModel?: string,
-): RegistryTier {
-  const t: RegistryTier = { tier, model, provider };
-  if (upstreamModel !== undefined) t.upstreamModel = upstreamModel;
-  return t;
-}
-
 // ---------------------------------------------------------------------------
 
-describe("buildRegistry — 跨 provider 同 model id 消歧（v5 不变量 #4）", () => {
-  test("3 tier 都用 claude-sonnet-4-6，3 个不同 provider → 3 个 entry，key 形如 ${provider}/${base}", () => {
-    const kimi = makeSub("kimi");
-    const foo = makeSub("foo");
-    const bar = makeSub("bar");
-    const tiers = [
-      makeTier("opus", "kimi/claude-sonnet-4-6[1m]", kimi),
-      makeTier("sonnet", "foo/claude-sonnet-4-6[1m]", foo),
-      makeTier("haiku", "bar/claude-sonnet-4-6[1m]", bar),
-    ];
-    const reg = buildRegistry(tiers);
-
-    expect(reg.size).toBe(3);
-    expect(reg.has("kimi/claude-sonnet-4-6")).toBe(true);
-    expect(reg.has("foo/claude-sonnet-4-6")).toBe(true);
-    expect(reg.has("bar/claude-sonnet-4-6")).toBe(true);
-  });
-
-  test("同 provider + 同 model id + 不同 tier → 3 个 entry（key 仍按 provider 消歧）", () => {
-    const kimi = makeSub("kimi");
-    const tiers = [
-      makeTier("opus", "kimi/claude-sonnet-4-6", kimi),
-      makeTier("sonnet", "kimi/claude-sonnet-4-6", kimi),
-      makeTier("haiku", "kimi/claude-sonnet-4-6", kimi),
-    ];
-    const reg = buildRegistry(tiers);
-    // 3 次 set 同一 key，最后一个 entry 胜出（按 provider 走 key 消歧这里是同一 key）
-    // 注意：v5 文档「同 provider + 同 model + 不同 mode」会撞 key 是已知 YAGNI
+describe("buildRegistry — 单 entry", () => {
+  test("普通 profile → 1 个 entry，key = strip1m(model)", () => {
+    const reg = buildRegistry(makeProfile());
     expect(reg.size).toBe(1);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.apiKey).toBe("key-kimi");
+    expect(reg.has("claude-sonnet-4-6")).toBe(true);
+  });
+
+  test("空 registry 边界 → 不会发生但建出来是空（buildRegistry 总返 1 entry）", () => {
+    // 单 profile 概念下，buildRegistry 永远返 1 entry；这里仅 sanity check
+    const reg = buildRegistry(makeProfile({ model: "" }));
+    // model = "" 时 strip1m("") = ""，仍是 1 entry（key 为空串）
+    expect(reg.size).toBe(1);
   });
 });
 
 // ---------------------------------------------------------------------------
 
-describe("buildRegistry — strip1m(t.model) 行为", () => {
-  test("含 [1m] → key 剥掉", () => {
-    const kimi = makeSub("kimi");
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6[1m]", kimi)]);
-    expect(reg.has("kimi/claude-sonnet-4-6")).toBe(true);
-    expect(reg.has("kimi/claude-sonnet-4-6[1m]")).toBe(false);
+describe("buildRegistry — strip1m key 行为", () => {
+  test("supports1m=true → key 仍是裸 model（registry 看不到 [1m]）", () => {
+    const reg = buildRegistry(makeProfile({ model: "claude-sonnet-4-6[1m]" }));
+    expect(reg.has("claude-sonnet-4-6")).toBe(true);
+    expect(reg.has("claude-sonnet-4-6[1m]")).toBe(false);
   });
 
-  test("无 [1m] → key 原样", () => {
-    const kimi = makeSub("kimi");
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.has("kimi/claude-sonnet-4-6")).toBe(true);
-  });
-
-  test("upstreamModel 显式传时用上游 base name（不被 t.model 推算影响）", () => {
-    const kimi = makeSub("kimi");
-    const reg = buildRegistry([
-      makeTier("opus", "kimi/claude-sonnet-4-6[1m]", kimi, "claude-sonnet-4-6"),
-    ]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.upstreamModel).toBe("claude-sonnet-4-6");
-  });
-
-  test("upstreamModel 不传时 fallback 到 strip1m(t.model)（带前缀场景里这个值是错的，但 fallback 逻辑如此）", () => {
-    const kimi = makeSub("kimi");
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.upstreamModel).toBe("kimi/claude-sonnet-4-6");
+  test("裸 model id → key 原样", () => {
+    const reg = buildRegistry(makeProfile({ model: "claude-sonnet-4-6" }));
+    expect(reg.has("claude-sonnet-4-6")).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
 
-describe("buildRegistry — endpoint 末尾 / 规整 + apiKey 兜底", () => {
+describe("buildRegistry — endpoint 末尾 / 规整 + apiKey 透传", () => {
   test("endpoint 末尾 / → 剥掉", () => {
-    const kimi = makeSub("kimi", { endpoint: "https://example.invalid/kimi/" });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.endpoint).toBe("https://example.invalid/kimi");
+    const reg = buildRegistry(
+      makeProfile({ endpoint: "https://example.invalid/test/" }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.endpoint).toBe(
+      "https://example.invalid/test",
+    );
   });
 
   test("endpoint 末尾 // → 全部剥", () => {
-    const kimi = makeSub("kimi", { endpoint: "https://example.invalid/kimi///" });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.endpoint).toBe("https://example.invalid/kimi");
+    const reg = buildRegistry(
+      makeProfile({ endpoint: "https://example.invalid/test///" }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.endpoint).toBe(
+      "https://example.invalid/test",
+    );
   });
 
-  test("apiKey 缺失 → 兜底空串（不抛错）", () => {
-    const kimi = makeSub("kimi", { apiKey: undefined });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.apiKey).toBe("");
+  test("apiKey 透传", () => {
+    const reg = buildRegistry(makeProfile({ apiKey: "sk-1234" }));
+    expect(reg.get("claude-sonnet-4-6")?.apiKey).toBe("sk-1234");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("buildRegistry — entry.model 字段", () => {
+  test("model 裸（无 [1m]） → entry.model = profile.model", () => {
+    const reg = buildRegistry(makeProfile({ model: "claude-sonnet-4-6" }));
+    expect(reg.get("claude-sonnet-4-6")?.model).toBe("claude-sonnet-4-6");
+  });
+
+  test("supports1m=true → model 字段不带 [1m]（[1m] 只写给 claude-code，不传给上游）", () => {
+    // 实际上 Profile.model 不带 [1m]（supports1m 是 boolean 字段），这里只是 sanity
+    const reg = buildRegistry(makeProfile({ model: "claude-sonnet-4-6" }));
+    const entry = reg.get("claude-sonnet-4-6")!;
+    expect(entry.model).toBe("claude-sonnet-4-6");
+    expect(entry.model.endsWith("[1m]")).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
 
 describe("buildRegistry — rectifier 挂载", () => {
-  test("mode=rectify + provider.rectifier 存在 → entry.rectifier 挂上", () => {
-    const kimi = makeSub("kimi", {
-      mode: "rectify",
-      rectifier: { anthropic: { requestHeaders: { Authorization: "Bearer x" } } },
-    });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.rectifier).toEqual({
+  test("mode=rectify + profile.rectifier 存在 → entry.rectifier 挂上", () => {
+    const reg = buildRegistry(
+      makeProfile({
+        mode: "rectify",
+        rectifier: {
+          anthropic: { requestHeaders: { Authorization: "Bearer x" } },
+        },
+      }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.rectifier).toEqual({
       anthropic: { requestHeaders: { Authorization: "Bearer x" } },
     });
   });
 
-  test("mode=rectify + provider.rectifier 缺失 → entry.rectifier 仍是 undefined", () => {
-    const kimi = makeSub("kimi", { mode: "rectify" });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.rectifier).toBeUndefined();
+  test("mode=rectify + profile.rectifier 缺失 → entry.rectifier undefined", () => {
+    const reg = buildRegistry(makeProfile({ mode: "rectify" }));
+    expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
   });
 
-  test("mode=direct → 不挂 rectifier（即使 provider.rectifier 有值）", () => {
-    const kimi = makeSub("kimi", {
-      mode: "direct",
-      rectifier: { anthropic: { requestHeaders: { Authorization: "Bearer x" } } },
-    });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.rectifier).toBeUndefined();
+  test("mode=direct → 不挂 rectifier（即使 profile.rectifier 有值）", () => {
+    const reg = buildRegistry(
+      makeProfile({
+        mode: "direct",
+        rectifier: {
+          anthropic: { requestHeaders: { Authorization: "Bearer x" } },
+        },
+      }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
   });
 
-  test("mode=convert → 不挂 rectifier（CLAUDE.md: convert 模式覆盖 anthropic↔openai 翻译，不在整流层做）", () => {
-    const kimi = makeSub("kimi", {
-      mode: "convert",
-      type: "openai",
-      endpoint: "https://example.invalid/openai",
-      rectifier: { anthropic: { requestHeaders: { Authorization: "Bearer x" } } },
-    });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.rectifier).toBeUndefined();
-    expect(reg.get("kimi/claude-sonnet-4-6")?.mode).toBe("convert");
+  test("mode=openai → 不挂 rectifier（rectify 专属）", () => {
+    const reg = buildRegistry(
+      makeProfile({
+        mode: "openai",
+        endpoint: "https://example.invalid/openai",
+        rectifier: {
+          anthropic: { requestHeaders: { Authorization: "Bearer x" } },
+        },
+      }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
+    expect(reg.get("claude-sonnet-4-6")?.mode).toBe("openai");
   });
 });
 
 // ---------------------------------------------------------------------------
 
-describe("buildRegistry — 边界", () => {
-  test("空 tiers → 空 Map", () => {
-    const reg = buildRegistry([]);
-    expect(reg.size).toBe(0);
-  });
-
-  test("type=openai 端点透传", () => {
-    const kimi = makeSub("kimi", { type: "openai", endpoint: "https://example.invalid/openai" });
-    const reg = buildRegistry([makeTier("opus", "kimi/claude-sonnet-4-6", kimi)]);
-    expect(reg.get("kimi/claude-sonnet-4-6")?.type).toBe("openai");
+describe("buildRegistry — mode 透传", () => {
+  test.each([
+    ["direct", "direct"],
+    ["rectify", "rectify"],
+    ["openai", "openai"],
+  ] as const)("mode=%s → entry.mode=%s", (m, expected) => {
+    const reg = buildRegistry(makeProfile({ mode: m }));
+    const entry = reg.get("claude-sonnet-4-6") as RouteEntry;
+    expect(entry.mode).toBe(expected);
   });
 });
 

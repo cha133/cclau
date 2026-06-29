@@ -21,6 +21,11 @@ export interface Profile {
   model: string;
   supports1m: boolean;
   default?: boolean;
+  /**
+   * 仅 rectify 模式生效。builtin preset 自动填，或手编 TOML。
+   * direct / openai 模式忽略。
+   */
+  rectifier?: Rectifier;
   createdAt: number;
   updatedAt: number;
 }

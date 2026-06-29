@@ -15,7 +15,7 @@ import * as p from "@clack/prompts";
 import { BUILTIN_PRESETS, CUSTOM_PRESET, findPreset } from "../builtins.js";
 import { BUILTIN_PRESETS as PRESET_RULES } from "../preset-rules.js";
 import { listProfiles, listProfileNames, upsertProfile } from "../config.js";
-import type { Mode, Profile } from "../types.js";
+import type { Mode, Profile, Rectifier } from "../types.js";
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
 import { pc } from "../utils/logger.js";
 import { fetchUpstreamModels } from "../core/model-fetch.js";
@@ -264,13 +264,14 @@ export async function addCmd(): Promise<void> {
     updatedAt: now,
   };
 
+  // rectify 模式 + builtin preset + 启用整流 → 落盘 preset 规则
+  if (enableRectifier && PRESET_RULES[preset!.name]) {
+    profile.rectifier = { anthropic: PRESET_RULES[preset!.name] } as Rectifier;
+  }
+
   await upsertProfile(profile);
 
-  // 注：rectifier 字段在 Profile 上暂不写入 —— builtin 整流预设待 Phase 4 决定
-  // 是否纳入 Profile schema。当前 add wizard 只问 enable/disable，不落盘。
-  void enableRectifier;
-
-  const rectHint = enableRectifier ? " (rectifier 启用预设中)" : "";
+  const rectHint = profile.rectifier ? " (rectifier enabled)" : "";
   p.outro(
     pc.green(
       `✓ 已添加 profile "${name}"（${mode}, model: ${model}${rectHint}）`,
