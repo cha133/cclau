@@ -1,28 +1,29 @@
 #!/usr/bin/env bun
 // cclau - Claude Code launcher
 //
-// 架构（详见 plan）：Bun + commander + smol-toml + Bun.serve
-// 订阅：3 builtin (deepseek / minimax / mimo) + 自添加
-// 三种 mode：direct（直连） / rectify（anthropic 整流） / convert（openai 转换）
-//
-// refactor 之后：新增 `models` 和 `profile` 子命令组；默认 `cclau <name>` 只解析 profile。
+// 5 层路由（详见 .claude/02-cli-routing.md）：
+//   1. 无参 → launch default profile
+//   2. -h/--help 单独首参 → cclau help（拦截 cc help）
+//   3. 首参以 - 开头 → launch default + 透传所有 argv 给 claude
+//   4. 已知子命令 → commander
+//   5. 其余 → fuzzy match profile + 透传剩余 args 给 claude
 
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
-import { listCmd } from "./commands/ls.js";
-import { rmCmd } from "./commands/rm.js";
-import { showCmd } from "./commands/show.js";
 import { addCmd } from "./commands/add.js";
 import { editCmd } from "./commands/edit.js";
-import { doctorCmd } from "./commands/doctor.js";
-import { modelsCmd } from "./commands/models.js";
-import { profileAddCmd } from "./commands/profile/add.js";
-import { profileListCmd } from "./commands/profile/ls.js";
-import { profileRmCmd } from "./commands/profile/rm.js";
+import { listCmd } from "./commands/ls.js";
+import { registerDefault } from "./commands/default.js";
 import { launchCmd } from "./commands/launch.js";
-import { registerAlias } from "./commands/alias.js";
-import { registerSwitch } from "./commands/switch.js";
+import { rmCmd } from "./commands/rm.js";
+import { showCmd } from "./commands/show.js";
+import { getDefaultProfile, listProfiles } from "./config.js";
+import { pc } from "./utils/logger.js";
 
+// commander 已知子命令。增减只改这一处。
+// 最终名单（详见 .claude/02-cli-routing.md § 规则 4）：
+//   add edit rm remove ls list show default help version
+// 已删：doctor models alias switch profile（及其子命令组）
 const KNOWN_SUBCOMMANDS = new Set([
   "add",
   "edit",
@@ -31,11 +32,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "ls",
   "list",
   "show",
-  "doctor",
-  "models",
-  "profile",
-  "alias",
-  "switch",
+  "default",
   "help",
   "version",
 ]);
@@ -44,20 +41,20 @@ const program = new Command();
 
 program
   .name("cclau")
-  .description("Claude Code launcher with subscription manager and protocol conversion")
+  .description("Claude Code launcher with profile manager")
   .version(pkg.version, "-v, --version")
   .showHelpAfterError(true);
 
 program
   .command("add")
-  .description("交互式添加 provider")
+  .description("Interactively add a profile")
   .action(async () => {
     await addCmd();
   });
 
 program
   .command("edit <name>")
-  .description("编辑 provider 的 model 集合（多选 toggle）")
+  .description("Edit a profile (endpoint/key/mode/model/1m/default)")
   .action(async (name: string) => {
     await editCmd(name);
   });
@@ -65,7 +62,7 @@ program
 program
   .command("rm <name>")
   .alias("remove")
-  .description("删除 provider")
+  .description("Remove a profile")
   .action(async (name: string) => {
     await rmCmd(name);
   });
@@ -73,88 +70,88 @@ program
 program
   .command("ls")
   .alias("list")
-  .description("列出所有 alias 和 model")
+  .description("List all profiles")
   .action(() => {
     listCmd();
   });
 
 program
   .command("show <name>")
-  .description("显示 provider 或 profile 详情")
+  .description("Show profile details")
   .action((name: string) => {
     showCmd(name);
   });
 
-program
-  .command("doctor <name>")
-  .description("测试 provider 连通性")
-  .action(async (name: string) => {
-    await doctorCmd(name);
-  });
+// nvm 风格的 default 子命令组（详见 src/commands/default.ts）
+registerDefault(program);
 
-program
-  .command("models")
-  .description("列出所有 provider/model 组合")
-  .action(() => {
-    modelsCmd();
-  });
+// ============================================================================
+// main 路由
+// ============================================================================
 
-// v6：alias 子命令（抄自 cctra）
-registerAlias(program);
-// v6：switch 交互式 wizard（抄自 cctra）
-registerSwitch(program);
-
-const profileCmd = program
-  .command("profile")
-  .description("管理 profile（3 tier model 映射）");
-
-profileCmd
-  .command("add")
-  .description("交互式添加 profile")
-  .action(async () => {
-    await profileAddCmd();
-  });
-
-profileCmd
-  .command("ls")
-  .alias("list")
-  .description("列出所有 profile")
-  .action(() => {
-    profileListCmd();
-  });
-
-profileCmd
-  .command("rm <name>")
-  .alias("remove")
-  .description("删除 profile")
-  .action(async (name: string) => {
-    await profileRmCmd(name);
-  });
-
-// 主启动命令：cclau <name> [claude args...]
-// commander 不支持"未知子命令"路由，我们直接接管。
-// 如果 argv[0] 是已知子命令 → 走 commander；否则当作 launch。
-
-async function main() {
+async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const firstArg = argv[0];
 
-  if (!firstArg || firstArg.startsWith("-")) {
-    // cclau 或 cclau --help 之类 → 走 commander
+  // 规则 1：无参 → launch default
+  if (firstArg === undefined) {
+    await launchDefaultProfile([]);
+    return;
+  }
+
+  // 规则 2：-h / --help 单独首参 → cclau help（拦截 cc help）
+  if ((firstArg === "-h" || firstArg === "--help") && argv.length === 1) {
     program.parse(process.argv);
     return;
   }
 
+  // 规则 3：首参以 - 开头 → launch default + 透传给 claude
+  if (firstArg.startsWith("-")) {
+    await launchDefaultProfile(argv);
+    return;
+  }
+
+  // 规则 4：已知子命令 → commander
   if (KNOWN_SUBCOMMANDS.has(firstArg)) {
-    // 已知子命令 → commander
     program.parse(process.argv);
     return;
   }
 
-  // 否则：launch 模式
-  // 透传其余所有参数给 claude
-  const claudeArgs = argv.slice(1);
-  await launchCmd(firstArg, claudeArgs);
+  // 规则 5：fuzzy match profile + 透传剩余 args
+  await launchCmd(firstArg, argv.slice(1));
+}
+
+/**
+ * 解析 default profile → 调 launchCmd。
+ * 错误：0 default → 提示用户设；多 default → 提示用户清。
+ *
+ * Phase 2 留在这里 —— 不入 launch.ts（launch.ts 内部重写是 Phase 4）。
+ */
+async function launchDefaultProfile(args: string[]): Promise<void> {
+  const all = listProfiles();
+  const defaults = all.filter((p) => p.default === true);
+
+  if (defaults.length > 1) {
+    console.error(pc.red(`错误：多个 profile 都标了 default：`));
+    for (const p of defaults) {
+      console.error(pc.dim(`  - ${p.name}`));
+    }
+    console.error(
+      pc.dim(`运行 ${pc.cyan("`cclau default <name>`")} 重设一个，或 ${pc.cyan("`cclau edit <name>`")} 取消多余 default。`),
+    );
+    process.exit(1);
+  }
+
+  const def = getDefaultProfile();
+  if (!def) {
+    console.error(pc.dim("(无 default profile)"));
+    console.error(
+      pc.dim(`运行 ${pc.cyan("`cclau default <name>`")} 设定。`),
+    );
+    process.exit(1);
+  }
+
+  await launchCmd(def.name, args);
 }
 
 main().catch((err) => {
