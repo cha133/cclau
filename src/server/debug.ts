@@ -114,6 +114,7 @@ function buildLogger(): DebugLogger {
         url,
         `headers: ${summarizeHeaders(headers)}`,
         `body.thinking: ${JSON.stringify(extractThinking(body))}`,
+        `body.reasoning_effort: ${JSON.stringify((body as { reasoning_effort?: unknown })?.reasoning_effort)}`,
         `body.stream: ${JSON.stringify((body as { stream?: unknown })?.stream)}`,
       ]);
     },
