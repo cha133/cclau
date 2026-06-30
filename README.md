@@ -67,8 +67,8 @@ The sidecar listens on `127.0.0.1:3133` (or next free port) and is torn down whe
 - **DeepSeek** — `https://api.deepseek.com/anthropic`, mode `direct`
 - **MiniMax** — `https://api.minimaxi.com/anthropic`, mode `direct`
 - **Xiaomi MiMo** — `https://api.xiaomimimo.com/anthropic`, mode `direct`
-- **Moonshot Kimi** — `https://api.moonshot.cn/anthropic`, mode `direct` (rectifier preset available)
-- **OpenCode Go** — `https://opencode.ai/zen/go`, mode `direct` (rectifier preset available)
+- **Moonshot Kimi** — `https://api.moonshot.cn/anthropic`, mode `rectify` (rectifier preset available)
+- **OpenCode Go** — `https://opencode.ai/zen/go`, mode `rectify` (rectifier preset available)
 - **Custom** — you pick endpoint and mode
 
 ## Built-in rectifier presets
@@ -78,7 +78,9 @@ Available when adding a profile in `rectify` mode — the wizard shows a single-
 - **opencode-go** — adds an `Authorization: Bearer <apiKey>` header alongside the default `x-api-key` (fixes 401 on OpenCode Go)
 - **kimi** — normalizes `thinking.type` to the supported string values (fixes 400 on Kimi thinking effort)
 
-When you pick a vendor with its own rule (OpenCode Go, Kimi), that rule is pre-selected — press Enter to accept. Custom vendors (and vendors without a dedicated rule) default to `none`; you can still pick any other rule from the list to borrow a workaround. To skip entirely, choose `none (no rectifier)`; you can also hand-edit TOML afterwards.
+Default-mode heuristic: when you pick a vendor with its own rule (OpenCode Go, Kimi), the wizard pre-selects `rectify` so the rule picker actually appears in the next step — and the matching rule is pre-selected there too (press Enter twice to accept both). Vendors without a dedicated rule (DeepSeek, MiniMax, MiMo) default to `direct`. Custom vendors leave the mode picker open.
+
+In the rule picker you can also pick any other rule from the list to borrow a workaround for a different vendor's quirk. To skip entirely, choose `none (no rectifier)`; you can also hand-edit TOML afterwards.
 
 ## Configuration file
 

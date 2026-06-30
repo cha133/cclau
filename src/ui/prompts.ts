@@ -454,8 +454,18 @@ export async function promptAdd(): Promise<Profile> {
     process.exit(1);
   }
 
-  // 2. Mode（无条件，builtin 也问；initialValue 用 preset.defaultMode）
-  const mode = await promptMode(isCustom ? undefined : preset.defaultMode);
+  // 2. Mode（无条件，builtin 也问；initialValue 优先级：
+//    - custom vendor：undefined（让用户挑）
+//    - builtin vendor 在 PRESET_RULES 命中 → "rectify"
+//      （既然选了这条 vendor 大概率就是要走整流路径，让 rectifier picker
+//       真的出现在下一步）
+//    - builtin vendor 没命中 → preset.defaultMode（通常 direct）
+  const initialMode: Mode | undefined = isCustom
+    ? undefined
+    : PRESET_RULES[preset.name]
+      ? "rectify"
+      : preset.defaultMode;
+  const mode = await promptMode(initialMode);
 
   // 3. Endpoint
   const endpointInitial = isCustom ? "" : preset.endpoint;
