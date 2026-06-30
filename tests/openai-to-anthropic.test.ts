@@ -516,3 +516,174 @@ describe("convertOpenAIStreamToAnthropic — 状态机", () => {
     expect((start?.data as { message: { model: string } }).message.model).toBe("claude-sonnet-4-6");
   });
 });
+
+// ===========================================================================
+// thinking 透传 — 请求方向（anthropic → openai）
+// ===========================================================================
+
+describe("anthropicToOpenAI — thinking 透传", () => {
+  test("req.thinking.type='enabled' → out.thinking={type:'enabled'}", () => {
+    const req = makeAnthropicReq({ thinking: { type: "enabled", budget_tokens: 8192 } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.thinking).toEqual({ type: "enabled" });
+  });
+
+  test("req.thinking.type='disabled' → out.thinking={type:'disabled'}", () => {
+    const req = makeAnthropicReq({ thinking: { type: "disabled" } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.thinking).toEqual({ type: "disabled" });
+  });
+
+  test("req.thinking.type=true → 归一为 'enabled'（GLM 不吃 boolean）", () => {
+    const req = makeAnthropicReq({ thinking: { type: true } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.thinking).toEqual({ type: "enabled" });
+  });
+
+  test("req.thinking.type=false → 归一为 'disabled'", () => {
+    const req = makeAnthropicReq({ thinking: { type: false } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.thinking).toEqual({ type: "disabled" });
+  });
+
+  test("effort 速记 type='high' → 归一为 'enabled'", () => {
+    const req = makeAnthropicReq({ thinking: { type: "high" } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.thinking).toEqual({ type: "enabled" });
+  });
+
+  test("req.thinking 缺失 → out.thinking 不存在（不强行加）", () => {
+    const req = makeAnthropicReq();
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.thinking).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// thinking 反向 — 响应方向（非流式）
+// ===========================================================================
+
+describe("openAIToAnthropic — reasoning_content → thinking block", () => {
+  test("reasoning_content + content → content=[thinking, text]（reasoning 在前）", () => {
+    const res = makeOpenAIRes({
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "final answer",
+            reasoning_content: "chain of thought",
+          },
+          finish_reason: "stop",
+        },
+      ],
+    });
+    const out = openAIToAnthropic(res, "m");
+    expect(out.content).toEqual([
+      { type: "thinking", thinking: "chain of thought" },
+      { type: "text", text: "final answer" },
+    ]);
+  });
+
+  test("只有 reasoning_content 无 content → content=[thinking]", () => {
+    const res = makeOpenAIRes({
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: null, reasoning_content: "deep think" },
+          finish_reason: "stop",
+        },
+      ],
+    });
+    const out = openAIToAnthropic(res, "m");
+    expect(out.content).toEqual([{ type: "thinking", thinking: "deep think" }]);
+  });
+
+  test("只有 content 无 reasoning_content → 不出 thinking block", () => {
+    const res = makeOpenAIRes({
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "just text" },
+          finish_reason: "stop",
+        },
+      ],
+    });
+    const out = openAIToAnthropic(res, "m");
+    expect(out.content).toEqual([{ type: "text", text: "just text" }]);
+  });
+});
+
+// ===========================================================================
+// thinking 反向 — 响应方向（流式）
+// ===========================================================================
+
+describe("convertOpenAIStreamToAnthropic — reasoning_content → thinking_delta", () => {
+  test("reasoning_content delta → content_block_start(thinking) + thinking_delta", async () => {
+    const chunks: OpenAIStreamChunk[] = [
+      sseChunk({ reasoning_content: "let me think" }),
+      sseChunk({ reasoning_content: " more" }, "stop"),
+    ];
+    const events = await collectSseEvents(
+      convertOpenAIStreamToAnthropic(arrayIter(chunks), "m"),
+    );
+
+    // 第一个 content_block_start 应该是 thinking 块
+    const blockStarts = events.filter((e) => e.event === "content_block_start");
+    expect(blockStarts).toHaveLength(1);
+    const thinkStart = blockStarts[0]?.data as { content_block: { type: string; thinking: string } };
+    expect(thinkStart.content_block.type).toBe("thinking");
+    expect(thinkStart.content_block.thinking).toBe("");
+
+    // 2 个 thinking_delta（reasoning_content 增量）
+    const thinkDeltas = events.filter(
+      (e) =>
+        e.event === "content_block_delta" &&
+        (e.data as { delta: { type?: string } }).delta.type === "thinking_delta",
+    );
+    expect(thinkDeltas).toHaveLength(2);
+
+    // 没有 text_delta（这次纯 reasoning）
+    const textDeltas = events.filter(
+      (e) =>
+        e.event === "content_block_delta" &&
+        (e.data as { delta: { type?: string } }).delta.type === "text_delta",
+    );
+    expect(textDeltas).toHaveLength(0);
+  });
+
+  test("reasoning → content 切换 → 中间有 content_block_stop + 新 block_start", async () => {
+    const chunks: OpenAIStreamChunk[] = [
+      sseChunk({ reasoning_content: "thinking..." }),
+      sseChunk({ content: "answer" }, "stop"),
+    ];
+    const events = await collectSseEvents(
+      convertOpenAIStreamToAnthropic(arrayIter(chunks), "m"),
+    );
+
+    // 2 个 block_start（thinking + text）
+    const blockStarts = events.filter((e) => e.event === "content_block_start");
+    expect(blockStarts).toHaveLength(2);
+    expect((blockStarts[0]?.data as { content_block: { type: string } }).content_block.type).toBe("thinking");
+    expect((blockStarts[1]?.data as { content_block: { type: string } }).content_block.type).toBe("text");
+
+    // 2 个 block_stop（thinking 关 + text 关）
+    const stops = events.filter((e) => e.event === "content_block_stop");
+    expect(stops.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("content → reasoning 不太可能（GLM 先 reasoning 后 content），但状态机应能正确切回 text", async () => {
+    const chunks: OpenAIStreamChunk[] = [
+      sseChunk({ content: "first" }),
+      sseChunk({ reasoning_content: "now think" }, "stop"),
+    ];
+    const events = await collectSseEvents(
+      convertOpenAIStreamToAnthropic(arrayIter(chunks), "m"),
+    );
+
+    const blockStarts = events.filter((e) => e.event === "content_block_start");
+    expect(blockStarts).toHaveLength(2);
+    expect((blockStarts[0]?.data as { content_block: { type: string } }).content_block.type).toBe("text");
+    expect((blockStarts[1]?.data as { content_block: { type: string } }).content_block.type).toBe("thinking");
+  });
+});

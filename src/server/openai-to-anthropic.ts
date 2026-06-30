@@ -132,7 +132,29 @@ export function anthropicToOpenAI(req: AnthropicRequest, upstreamModel: string):
     top_p: req.top_p,
     ...(tools ? { tools } : {}),
     ...(tool_choice ? { tool_choice } : {}),
+    ...(req.thinking ? { thinking: normalizeThinking(req.thinking) } : {}),
   };
+}
+
+/**
+ * Coerce Anthropic `thinking.type` (string | boolean) to a string for
+ * OpenAI-extension-style upstreams (e.g. GLM accepts only "enabled" /
+ * "disabled"). Boolean / effort-shorthand → "enabled"; explicit "disabled"
+ * (any case) → pass through. Anything else (high/medium/low/xhigh/max/
+ * adaptive / unknown) → "enabled" as the safe default — GLM reasoning
+ * off-by-default is rarer than on-by-default.
+ */
+function normalizeThinking(t: {
+  type: string | boolean;
+  budget_tokens?: number;
+}): { type: string; [key: string]: unknown } {
+  if (typeof t.type === "string" && t.type.toLowerCase() === "disabled") {
+    return { type: "disabled" };
+  }
+  // boolean false → "disabled"; anything truthy (true / effort shorthand /
+  // numeric / unknown string) → "enabled"
+  if (t.type === false) return { type: "disabled" };
+  return { type: "enabled" };
 }
 
 // ============================================================================
@@ -149,6 +171,14 @@ export function openAIToAnthropic(
   }
 
   const content: AnthropicContentBlock[] = [];
+  // reasoning_content goes first — GLM-5.2 returns chain-of-thought before
+  // the final answer, mirroring Anthropic's content_block ordering.
+  if (choice.message.reasoning_content) {
+    content.push({
+      type: "thinking",
+      thinking: choice.message.reasoning_content,
+    });
+  }
   if (choice.message.content) {
     content.push({ type: "text", text: choice.message.content });
   }
@@ -210,7 +240,7 @@ function mapFinishReason(reason: OpenAIResponse["choices"][number]["finish_reaso
 class StreamState {
   messageStarted = false;
   currentBlockIdx = -1;
-  currentBlockType: "text" | "tool_use" | null = null;
+  currentBlockType: "text" | "tool_use" | "thinking" | null = null;
   currentToolId = "";
   currentToolName = "";
   currentToolArgs = "";
@@ -254,6 +284,30 @@ export async function* convertOpenAIStreamToAnthropic(
     if (!choice) continue;
 
     const delta = choice.delta;
+
+    // thinking delta (GLM / DeepSeek-style chain-of-thought)
+    if (delta.reasoning_content) {
+      if (state.currentBlockType !== "thinking") {
+        if (state.currentBlockIdx >= 0) {
+          yield newSseEvent("content_block_stop", {
+            type: "content_block_stop",
+            index: state.currentBlockIdx,
+          });
+        }
+        state.currentBlockIdx++;
+        state.currentBlockType = "thinking";
+        yield newSseEvent("content_block_start", {
+          type: "content_block_start",
+          index: state.currentBlockIdx,
+          content_block: { type: "thinking", thinking: "" },
+        });
+      }
+      yield newSseEvent("content_block_delta", {
+        type: "content_block_delta",
+        index: state.currentBlockIdx,
+        delta: { type: "thinking_delta", thinking: delta.reasoning_content },
+      });
+    }
 
     // text delta
     if (delta.content) {

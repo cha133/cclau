@@ -165,6 +165,13 @@ export interface OpenAIRequest {
   tool_choice?: OpenAIToolChoice;
   temperature?: number;
   top_p?: number;
+  /**
+   * Provider-extension field for thinking control. Used by GLM-family
+   * (Zhipu) providers: `{ type: "enabled" | "disabled" }`. OpenAI standard
+   * doesn't define this; we forward Anthropic's `req.thinking` as-is so
+   * GLM-compatible upstreams see the same shape.
+   */
+  thinking?: { type: string; [key: string]: unknown };
   [key: string]: unknown;
 }
 
