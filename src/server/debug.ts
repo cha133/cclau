@@ -1,21 +1,25 @@
 // Sidecar debug logger (CCLAU_DEBUG=1).
 //
-// Lives at $XDG_STATE_HOME/cclau/debug.log. Off by default — zero overhead when
-// the env flag isn't set. Callers in anthropic-passthrough / openai-to-anthropic
-// receive a no-op stub from getDebugLogger() so they don't need to branch.
+// Each `cclau --cclau-debug` invocation gets its own per-session log file at
+// $XDG_STATE_HOME/cclau/debug-{ISO timestamp}.log. Old logs are kept (use
+// `rm ~/.local/state/cclau/debug-*.log` to clear). Off by default — zero
+// overhead when the env flag isn't set; callers receive a no-op stub from
+// getDebugLogger() so they don't need to branch.
 //
 // Design notes:
 // - Headers containing credentials (x-api-key / authorization / bearer / token)
 //   are redacted to first-4 + mask + last-4 chars. Full keys never land on disk.
 // - Bodies are logged in full (caller opted into debug; user prompts are their
 //   own data, not ours to redact).
-// - Every line prefixed with ISO timestamp so multi-run logs can be diffed.
+// - Per-session file naming preserves all sessions, lets you `diff debug-A.log
+//   debug-B.log` to compare two cclau runs side-by-side.
 //
 // Future: add `cclau debug tail` / `cclau debug path` view-only subcommands
 // once there's enough signal that the log is worth reading interactively.
 
 import { appendFileSync } from "node:fs";
-import { DEBUG_LOG_PATH, ensureAppStateDir } from "../utils/paths.js";
+import { join } from "node:path";
+import { APP_STATE_DIR, ensureAppStateDir } from "../utils/paths.js";
 
 export interface DebugLogger {
   /** Incoming request from claude-code (anthropic side). */
@@ -54,17 +58,30 @@ function extractThinking(body: unknown): unknown {
   return undefined;
 }
 
-/** Append one or more lines to the debug log, each prefixed with ISO timestamp. */
-function writeLines(lines: string[]): void {
+/**
+ * Per-session log path. Pinned to sidecar boot time so multiple handler
+ * invocations during one cclau run land in the same file. Windows-safe:
+ * colons / dots in ISO timestamps are replaced with `-` (Windows forbids
+ * `:` in filenames; `.` would be ambiguous with the `.log` extension).
+ */
+function sessionLogPath(): string {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  return join(APP_STATE_DIR, `debug-${ts}.log`);
+}
+
+/** Append one or more lines to the per-session log, each prefixed with ISO timestamp. */
+function writeLines(logPath: string, lines: string[]): void {
   const ts = new Date().toISOString();
-  appendFileSync(DEBUG_LOG_PATH, lines.map((l) => `[${ts}] ${l}`).join("\n") + "\n");
+  appendFileSync(logPath, lines.map((l) => `[${ts}] ${l}`).join("\n") + "\n");
 }
 
 function buildLogger(): DebugLogger {
   ensureAppStateDir();
+  const logPath = sessionLogPath();
   return {
     logIn(url, headers, body) {
-      writeLines([
+      writeLines(logPath, [
+        `session log: ${logPath}`,
         "--- IN ---",
         url,
         `headers: ${summarizeHeaders(headers)}`,
@@ -74,7 +91,7 @@ function buildLogger(): DebugLogger {
       ]);
     },
     logOut(url, headers, body) {
-      writeLines([
+      writeLines(logPath, [
         "--- OUT ---",
         url,
         `headers: ${summarizeHeaders(headers)}`,
@@ -83,7 +100,7 @@ function buildLogger(): DebugLogger {
       ]);
     },
     logUpstreamChunk(event, data) {
-      writeLines([`--- UPSTREAM ${event} ---`, JSON.stringify(data)]);
+      writeLines(logPath, [`--- UPSTREAM ${event} ---`, JSON.stringify(data)]);
     },
   };
 }

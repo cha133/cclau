@@ -123,6 +123,22 @@ Set `supports1m = true` and Claude Code will use the 1M context window when give
 - **Profile fields not specified in the wizard are left at their default** — `add` always sets `supports1m` and `mode`; `edit` lets you change any of `endpoint / apiKey / mode / model / supports1m`. To tweak things the wizard doesn't expose, hand-edit the TOML.
 - **Upgrading from a pre-global-default config** — if you have a `default = true` line under any `[profiles.<name>]` from a previous cclau version, every command will refuse to run until you migrate. Hand-delete those `default = true` lines from your `config.toml`, then run `cclau default <your-default-name>` once.
 
+## Debugging
+
+```bash
+cclau opencode-go --cclau-debug    # writes per-session log
+cclau --cclau-debug                # default profile + debug
+```
+
+The flag is consumed by cclau itself (never forwarded to claude code), and turns on the sidecar's debug log:
+
+- **Location**: `$XDG_STATE_HOME/cclau/debug-{ISO timestamp}.log` (default `~/.local/state/cclau/debug-…log`)
+- **Naming**: every `cclau` invocation gets its own timestamped file. Old files are kept — `rm ~/.local/state/cclau/debug-*.log` to clear
+- **Contents**: inbound request (claude-code → sidecar), outbound request (sidecar → upstream), and upstream SSE chunks (one per chunk). Header values matching `*api*key*` / `*authorization*` / `*bearer*` / `*token*` are redacted to first-4 + bullets + last-4 so full credentials never land on disk
+- **Compare two sessions**: `diff debug-A.log debug-B.log` — useful for diagnosing "sometimes thinking, sometimes not" by lining up the `body.thinking` field sent upstream
+
+This is independent of claude code's own `--debug`. cclau's flag records what the sidecar saw; claude code's flag records what its CLI saw. They cover different layers.
+
 ## Development
 
 ```bash

@@ -22,11 +22,11 @@ export function ensureAppCacheDir(): void {
 /**
  * State dir (XDG_STATE_HOME): logs and other persistent runtime data the
  * user may want to inspect but shouldn't be cached or synced as config.
- * Debug log lives here (CCLAU_DEBUG=1 in env → sidecar appends).
+ * Debug logs live here (CCLAU_DEBUG=1 in env → per-session file, see
+ * server/debug.ts).
  */
 const XDG_STATE = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
 export const APP_STATE_DIR = join(XDG_STATE, "cclau");
-export const DEBUG_LOG_PATH = join(APP_STATE_DIR, "debug.log");
 
 /** Ensure the cclau state dir exists (mkdir -p). */
 export function ensureAppStateDir(): void {
