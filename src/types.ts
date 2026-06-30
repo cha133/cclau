@@ -101,6 +101,14 @@ export interface AnthropicRequest {
   temperature?: number;
   top_p?: number;
   thinking?: { type: string | boolean; budget_tokens?: number };
+  /**
+   * Anthropic API envelope for output shaping — claude-code emits this for
+   * 3P models when CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1 or /effort is set.
+   * cclau converts `output_config.effort` into the openai-protocol
+   * `reasoning_effort` field in openai mode. In rectify mode it passes
+   * through to the upstream as-is.
+   */
+  output_config?: { effort?: string; [key: string]: unknown };
   [key: string]: unknown;
 }
 

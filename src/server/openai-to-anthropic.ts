@@ -138,6 +138,14 @@ export function anthropicToOpenAI(req: AnthropicRequest, upstreamModel: string):
     ...(tools ? { tools } : {}),
     ...(tool_choice ? { tool_choice } : {}),
     ...(req.thinking ? { thinking: normalizeThinking(req.thinking) } : {}),
+    // claude-code sends `output_config.effort` (Anthropic envelope). For 3P
+    // upstreams via opencode-go's openai-compat endpoint, translate to the
+    // openai-style top-level `reasoning_effort` field. Drop empty / whitespace
+    // strings (claude-code sometimes sends " " placeholders).
+    ...(typeof req.output_config?.effort === "string" &&
+    req.output_config.effort.trim().length > 0
+      ? { reasoning_effort: req.output_config.effort }
+      : {}),
   };
 }
 

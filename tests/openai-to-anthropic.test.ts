@@ -521,6 +521,44 @@ describe("convertOpenAIStreamToAnthropic — 状态机", () => {
 // thinking 透传 — 请求方向（anthropic → openai）
 // ===========================================================================
 
+describe("anthropicToOpenAI — output_config.effort → reasoning_effort", () => {
+  test("effort='high' → out.reasoning_effort='high'", () => {
+    const req = makeAnthropicReq({
+      output_config: { effort: "high" },
+    });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.reasoning_effort).toBe("high");
+  });
+
+  test("effort='max' → out.reasoning_effort='max'（GLM-5.2 专属深度控制）", () => {
+    const req = makeAnthropicReq({ output_config: { effort: "max" } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.reasoning_effort).toBe("max");
+  });
+
+  test("output_config 缺失 → out.reasoning_effort 不存在", () => {
+    const req = makeAnthropicReq();
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.reasoning_effort).toBeUndefined();
+  });
+
+  test("effort 空字符串 → out.reasoning_effort 不存在（claude-code 偶尔发 placeholder）", () => {
+    const req = makeAnthropicReq({ output_config: { effort: " " } });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.reasoning_effort).toBeUndefined();
+  });
+
+  test("effort + thinking 同时存在 → 两个都转（让 opencode-go preset 决定怎么取舍）", () => {
+    const req = makeAnthropicReq({
+      output_config: { effort: "high" },
+      thinking: { type: "enabled", budget_tokens: 8192 },
+    });
+    const out = anthropicToOpenAI(req, "m");
+    expect(out.reasoning_effort).toBe("high");
+    expect(out.thinking).toEqual({ type: "enabled" });
+  });
+});
+
 describe("anthropicToOpenAI — thinking 透传", () => {
   test("req.thinking.type='enabled' → out.thinking={type:'enabled'}", () => {
     const req = makeAnthropicReq({ thinking: { type: "enabled", budget_tokens: 8192 } });
