@@ -224,12 +224,14 @@ describe("BUILTIN_PRESETS_OPENAI 字典 + 常量", () => {
   });
 });
 
-describe("OPENCODE_GO_OPENAI_PRESET.requestTransform — drop thinking when reasoning_effort", () => {
+describe("OPENCODE_GO_OPENAI_PRESET.requestTransform — opencode-go openai quirks", () => {
   const transform = OPENCODE_GO_OPENAI_PRESET.requestTransform!;
   const baseReq = {
     model: "glm-5.2",
     messages: [{ role: "user" as const, content: "hi" }],
   };
+
+  // ─── thinking + reasoning_effort conflict (400 avoidance) ─────────────
 
   test("only thinking present（无 reasoning_effort）→ 原样透传", () => {
     const req = { ...baseReq, thinking: { type: "enabled" as const } };
@@ -237,21 +239,72 @@ describe("OPENCODE_GO_OPENAI_PRESET.requestTransform — drop thinking when reas
     expect(out).toEqual(req);
   });
 
-  test("only reasoning_effort present（无 thinking）→ 原样透传", () => {
-    const req = { ...baseReq, reasoning_effort: "high" };
-    const out = transform(req);
-    expect(out).toEqual(req);
-  });
-
-  test("thinking + reasoning_effort 同时 → drop thinking，保留 effort", () => {
+  test("thinking + reasoning_effort='none' → 只 drop thinking（none 不 graded，保留）", () => {
     const req = {
       ...baseReq,
       thinking: { type: "enabled" as const },
-      reasoning_effort: "max",
+      reasoning_effort: "none",
     };
     const out = transform(req);
-    expect(out).toEqual({ ...baseReq, reasoning_effort: "max" });
+    expect(out).toEqual({ ...baseReq, reasoning_effort: "none" });
     expect((out as { thinking?: unknown }).thinking).toBeUndefined();
+  });
+
+  // ─── Fireworks GLM-5.2 graded-tier quirk (surface reasoning) ─────────
+
+  test("reasoning_effort='high' 单独存在 → drop（Fireworks graded tier 不 surface）", () => {
+    const req = { ...baseReq, reasoning_effort: "high" };
+    const out = transform(req);
+    expect(out).toEqual(baseReq);
+    expect((out as { reasoning_effort?: unknown }).reasoning_effort).toBeUndefined();
+  });
+
+  test("reasoning_effort='max' 单独存在 → drop（同上）", () => {
+    const req = { ...baseReq, reasoning_effort: "max" };
+    const out = transform(req);
+    expect(out).toEqual(baseReq);
+  });
+
+  test("reasoning_effort='low' / 'medium' / 'xhigh' → drop", () => {
+    for (const v of ["low", "medium", "xhigh"] as const) {
+      const req = { ...baseReq, reasoning_effort: v };
+      const out = transform(req);
+      expect((out as { reasoning_effort?: unknown }).reasoning_effort).toBeUndefined();
+    }
+  });
+
+  test("reasoning_effort='none' → 保留（explicit disable 语义不同于 graded）", () => {
+    const req = { ...baseReq, reasoning_effort: "none" };
+    const out = transform(req);
+    expect((out as { reasoning_effort?: unknown }).reasoning_effort).toBe("none");
+  });
+
+  test("reasoning_effort=false → 保留", () => {
+    const req = { ...baseReq, reasoning_effort: false };
+    const out = transform(req);
+    expect((out as { reasoning_effort?: unknown }).reasoning_effort).toBe(false);
+  });
+
+  // ─── 组合 ────────────────────────────────────────────────────────────
+
+  test("thinking + effort='high' → 双 drop（thinking 因 400，effort 因 graded）", () => {
+    const req = {
+      ...baseReq,
+      thinking: { type: "enabled" as const },
+      reasoning_effort: "high",
+    };
+    const out = transform(req);
+    expect(out).toEqual(baseReq);
+  });
+
+  test("thinking + effort='none' → 只 drop thinking（none 保留，400 也避免）", () => {
+    const req = {
+      ...baseReq,
+      thinking: { type: "enabled" as const },
+      reasoning_effort: "none",
+    };
+    const out = transform(req);
+    expect(out).toEqual({ ...baseReq, reasoning_effort: "none" });
   });
 
   test("两者都无 → 原样透传", () => {

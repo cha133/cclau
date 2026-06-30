@@ -100,26 +100,56 @@ export function resolveRectifierByName(
 //      all routed through opencode-go, not glm-specific.)
 
 /**
- * opencode-go (openai mode): drop `thinking` when `reasoning_effort` is set.
+ * opencode-go (openai mode): drop `thinking` when `reasoning_effort` is set,
+ * and drop graded `reasoning_effort` so Fireworks GLM-5.2 surfaces reasoning.
  *
- * Pain point: opencode-go's chat-completions endpoint rejects requests with
- * both `thinking` and `reasoning_effort` set (HTTP 400 "cannot specify
- * both"). This affects every model routed through opencode-go (kimi,
- * deepseek, glm, etc.) when used in openai mode — not glm-specific.
+ * Pain point 1 (400 avoidance): opencode-go's chat-completions endpoint
+ * rejects requests with both `thinking` and `reasoning_effort` set (HTTP
+ * 400 "cannot specify both"). Drop `thinking` so the request is accepted.
  *
- * Strategy: claude-code converts `output_config.effort` into an
- * `reasoning_effort` field in openai mode. When that's present, drop
- * `thinking` from the openai payload so upstream accepts the request.
- * reasoning_effort alone still controls reasoning depth.
+ * Pain point 2 (surface reasoning): Fireworks' GLM-5.2 implementation
+ * accepts graded `reasoning_effort` values (low/medium/high/xhigh/max) but
+ * DOES NOT surface `reasoning_content` to the response — reasoning lands
+ * only in trace. Only `default` (omitted) and `none` (explicit disable)
+ * surface correctly. Since the user set effort because they want thinking,
+ * dropping the graded value lets Fireworks fall back to default (Max tier),
+ * which is what the user actually wanted.
+ *
+ * Net behavior with this preset enabled:
+ *   - claude-code `/effort high` → cclau drops effort → Fireworks default
+ *     Max → user sees reasoning_content. Without this preset, user sees
+ *     a silent "I asked for high but got default anyway" trap.
+ *   - claude-code `/effort none` → preserved as `none` → Fireworks disables
+ *     thinking → user gets a non-thinking response as expected.
+ *
+ * `none` and `false` are preserved explicitly (different semantic: they
+ * intentionally disable thinking rather than request "deeper thinking").
  */
 export const OPENCODE_GO_OPENAI_PRESET = {
   requestTransform: (req: OpenAIRequest): OpenAIRequest => {
-    if (req.reasoning_effort === undefined) return req;
-    if (req.thinking === undefined) return req;
-    // Drop `thinking`, keep everything else verbatim.
-    const { thinking: _drop, ...rest } = req;
-    void _drop;
-    return rest;
+    let out: OpenAIRequest = req;
+
+    // 1. opencode-go 400: drop `thinking` when `reasoning_effort` is set.
+    if (out.reasoning_effort !== undefined && out.thinking !== undefined) {
+      const { thinking: _dropThinking, ...rest } = out;
+      void _dropThinking;
+      out = rest;
+    }
+
+    // 2. Fireworks GLM-5.2 graded-tier quirk: drop effort so Fireworks
+    //    falls back to default Max tier (which surfaces reasoning_content).
+    //    Preserve explicit-disable (`none` / `false`).
+    if (
+      typeof out.reasoning_effort === "string" &&
+      out.reasoning_effort !== "none" &&
+      out.reasoning_effort !== "false"
+    ) {
+      const { reasoning_effort: _dropEffort, ...rest } = out;
+      void _dropEffort;
+      out = rest;
+    }
+
+    return out;
   },
 };
 
