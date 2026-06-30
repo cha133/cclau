@@ -59,6 +59,23 @@ function extractThinking(body: unknown): unknown {
 }
 
 /**
+ * claude-code sends `output_config.effort` (Anthropic API envelope, distinct
+ * from `thinking`). For 3P models behind a sidecar, effort often doesn't
+ * propagate because the upstream protocol differs (e.g. GLM uses
+ * `reasoning_effort`, not `output_config.effort`). Recording it in the log
+ * lets you see whether claude-code actually emitted it for a given model.
+ */
+function extractOutputConfigEffort(body: unknown): unknown {
+  if (body && typeof body === "object" && "output_config" in body) {
+    const oc = (body as { output_config: unknown }).output_config;
+    if (oc && typeof oc === "object" && "effort" in oc) {
+      return (oc as { effort: unknown }).effort;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Per-session log path. Pinned to sidecar boot time so multiple handler
  * invocations during one cclau run land in the same file. Windows-safe:
  * colons / dots in ISO timestamps are replaced with `-` (Windows forbids
@@ -86,6 +103,7 @@ function buildLogger(): DebugLogger {
         url,
         `headers: ${summarizeHeaders(headers)}`,
         `body.thinking: ${JSON.stringify(extractThinking(body))}`,
+        `body.output_config.effort: ${JSON.stringify(extractOutputConfigEffort(body))}`,
         `body.stream: ${JSON.stringify((body as { stream?: unknown })?.stream)}`,
         `body.model: ${JSON.stringify((body as { model?: unknown })?.model)}`,
       ]);
