@@ -11,6 +11,7 @@ import {
   OPENCODE_GO_PRESET,
   KIMI_PRESET,
   BUILTIN_PRESETS,
+  RULE_DEFS,
   resolvePresetHeaders,
 } from "../src/preset-rules.js";
 import type { AnthropicRequest, AnthropicRectifier } from "../src/types.js";
@@ -162,5 +163,22 @@ describe("BUILTIN_PRESETS 字典 + 常量", () => {
 
   test("BEARER_APIKEY_SENTINEL 是稳定的魔术字符串（TOML 直读需要）", () => {
     expect(BEARER_APIKEY_SENTINEL).toBe("__CCLAU_BEARER_APIKEY__");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("RULE_DEFS — wizard UI metadata", () => {
+  test("keys 1:1 对齐 BUILTIN_PRESETS（多/漏都会让单选框错位）", () => {
+    expect(Object.keys(RULE_DEFS).sort()).toEqual(Object.keys(BUILTIN_PRESETS).sort());
+  });
+
+  test("每条 entry 都填了非空 label 和 hint", () => {
+    for (const def of Object.values(RULE_DEFS)) {
+      expect(def.label).toBeString();
+      expect(def.label.length).toBeGreaterThan(0);
+      expect(def.hint).toBeString();
+      expect(def.hint.length).toBeGreaterThan(0);
+    }
   });
 });

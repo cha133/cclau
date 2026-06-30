@@ -28,7 +28,7 @@
 
 import * as p from "@clack/prompts";
 import { BUILTIN_PRESETS, CUSTOM_PRESET, findPreset, type BuiltinPreset } from "../builtins.js";
-import { BUILTIN_PRESETS as PRESET_RULES } from "../preset-rules.js";
+import { BUILTIN_PRESETS as PRESET_RULES, RULE_DEFS } from "../preset-rules.js";
 import { listProfileNames, listProfiles } from "../config.js";
 import type { Mode, Profile, Rectifier } from "../types.js";
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
@@ -371,43 +371,62 @@ async function promptName(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// rectangle rule count（rectifier confirm 信息显示用）
+// rectifier rule picker（rectify mode wizard step）
 // ---------------------------------------------------------------------------
 
-function countRectifierRules(r: unknown | undefined): number {
-  if (!r || typeof r !== "object") return 0;
-  const r2 = r as Record<string, unknown>;
-  let n = 0;
-  for (const k of [
-    "modelAlias",
-    "requestHeaders",
-    "requestTransform",
-    "responseTransform",
-    "streamChunkTransform",
-  ]) {
-    if (r2[k] !== undefined) n++;
-  }
-  return n;
-}
+/** Sentinel value for the "no rectifier" option in the single-select picker. */
+const NO_RECTIFIER_SENTINEL = "__cclau_no_rectifier__";
 
 /**
- * 询问是否启用 builtin preset rule。仅 builtin preset + mode==rectify +
- * PRESET_RULES 命中时才调用。其它情况直接返回 false。
+ * Single-select rectifier picker, only relevant for rectify mode.
+ *
+ * Lists every rule in PRESET_RULES (label/hint from RULE_DEFS) plus a "none"
+ * option. The picked vendor's matching rule is pre-selected so the common
+ * case is "Enter to confirm"; custom vendors and vendors with no dedicated
+ * rule default to "none" but can still hand-pick any other rule.
+ *
+ * Returns the selected rule name, or undefined if the user picked "none"
+ * (or mode isn't rectify, or there are no rules to choose from).
+ *
+ * Design note: each vendor is expected to ship its own rule; the open
+ * picker is here so a "cold" vendor (no rule of its own) can still borrow
+ * a rule from a "hot" vendor that solves the same upstream quirk.
  */
-async function confirmBuiltinRectifier(
+async function pickBuiltinRectifier(
   preset: BuiltinPreset,
   mode: Mode,
-): Promise<boolean> {
-  if (mode !== "rectify") return false;
-  const rule = PRESET_RULES[preset.name];
-  if (!rule) return false;
-  const ruleCount = countRectifierRules(rule);
-  return checkCancel(
-    await p.confirm({
-      message: `Enable built-in rectifier preset for [${preset.name}]? (${ruleCount} rule${ruleCount === 1 ? "" : "s"}; you can also hand-edit TOML later)`,
-      initialValue: true,
+): Promise<string | undefined> {
+  if (mode !== "rectify") return undefined;
+  const ruleNames = Object.keys(PRESET_RULES);
+  if (ruleNames.length === 0) return undefined;
+
+  const options: Array<{ value: string; label: string; hint?: string }> = [
+    {
+      value: NO_RECTIFIER_SENTINEL,
+      label: "none (no rectifier)",
+      hint: "skip — wire nothing; you can hand-edit TOML later",
+    },
+    ...ruleNames.map((name) => {
+      const def = RULE_DEFS[name];
+      return {
+        value: name,
+        label: def?.label ?? name,
+        hint: def?.hint,
+      };
+    }),
+  ];
+
+  // Default = preset's own rule if it exists, else "none".
+  const initialValue = PRESET_RULES[preset.name] ? preset.name : NO_RECTIFIER_SENTINEL;
+
+  const result = checkCancel(
+    await p.select<string>({
+      message: "Rectifier rule:",
+      options,
+      initialValue,
     }),
   );
+  return result === NO_RECTIFIER_SENTINEL ? undefined : result;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,10 +461,8 @@ export async function promptAdd(): Promise<Profile> {
   const endpointInitial = isCustom ? "" : preset.endpoint;
   const endpoint = await promptEndpoint(endpointInitial, isCustom, mode);
 
-  // 4. 内置 rectifier preset 确认（仅 builtin + rectify + 有规则）
-  const enableRectifier = !isCustom
-    ? await confirmBuiltinRectifier(preset, mode)
-    : false;
+  // 4. 内置 rectifier rule 单选（仅 rectify mode + 有 rule 可选）
+  const pickedRule = await pickBuiltinRectifier(preset, mode);
 
   // 5. API Key
   const apiKey = await promptApiKeyNew();
@@ -485,9 +502,9 @@ export async function promptAdd(): Promise<Profile> {
     updatedAt: now,
   };
 
-  if (enableRectifier) {
+  if (pickedRule) {
     profile.rectifier = {
-      anthropic: PRESET_RULES[preset.name],
+      anthropic: PRESET_RULES[pickedRule],
     } as Rectifier;
   }
 

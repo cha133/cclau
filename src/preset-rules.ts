@@ -66,6 +66,23 @@ export const BUILTIN_PRESETS: Record<string, AnthropicRectifier> = {
 };
 
 /**
+ * Wizard UI metadata for each built-in rule. Keys MUST stay aligned 1:1
+ * with `BUILTIN_PRESETS` (consumed by promptAdd's rectifier picker to render
+ * the p.select options). When you add a new rule to BUILTIN_PRESETS, add a
+ * matching entry here too — preset-rules.test.ts enforces the alignment.
+ */
+export const RULE_DEFS: Record<string, { label: string; hint: string }> = {
+  "opencode-go": {
+    label: "opencode-go — dual auth header",
+    hint: "adds Authorization: Bearer <apiKey> alongside x-api-key (fixes 401)",
+  },
+  kimi: {
+    label: "kimi — normalize thinking.type",
+    hint: "coerce thinking.type to 'enabled' / 'disabled' string (fixes 400)",
+  },
+};
+
+/**
  * Resolve Rectifier.requestHeaders sentinels:
  * values equal to BEARER_APIKEY_SENTINEL → replaced with "Bearer ${apiKey}", others pass through.
  *

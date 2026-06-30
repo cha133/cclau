@@ -38,6 +38,12 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
     defaultMode: "direct",
   },
   {
+    name: "kimi",
+    label: "Moonshot Kimi",
+    endpoint: "https://api.moonshot.cn/anthropic",
+    defaultMode: "direct",
+  },
+  {
     name: "opencode-go",
     label: "OpenCode Go",
     endpoint: "https://opencode.ai/zen/go",
