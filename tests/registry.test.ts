@@ -139,7 +139,7 @@ describe("buildRegistry — rectifier 挂载", () => {
     expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
   });
 
-  test("mode=openai → 不挂 rectifier（rectify 专属）", () => {
+  test("mode=openai + rectifier='opencode-go' → 挂 openai rect (drop-thinking rule)", () => {
     const reg = buildRegistry(
       makeProfile({
         mode: "openai",
@@ -147,8 +147,37 @@ describe("buildRegistry — rectifier 挂载", () => {
         rectifier: "opencode-go",
       }),
     );
+    const rect = reg.get("claude-sonnet-4-6")?.rectifier;
+    expect(rect).toBeDefined();
+    expect(rect?.openai).toBeDefined();
+    // anthropic rect slot stays undefined — dual-mode split
+    expect(rect?.anthropic).toBeUndefined();
+  });
+
+  test("mode=rectify + rectifier='opencode-go' → 挂 anthropic rect (auth-header rule)", () => {
+    const reg = buildRegistry(
+      makeProfile({ mode: "rectify", rectifier: "opencode-go" }),
+    );
+    const rect = reg.get("claude-sonnet-4-6")?.rectifier;
+    expect(rect).toBeDefined();
+    expect(rect?.anthropic).toBeDefined();
+    // openai rect slot stays undefined
+    expect(rect?.openai).toBeUndefined();
+  });
+
+  test("mode=direct → 不挂任何 rectifier（rectifier 字段 silent ignore）", () => {
+    const reg = buildRegistry(
+      makeProfile({ mode: "direct", rectifier: "opencode-go" }),
+    );
     expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
-    expect(reg.get("claude-sonnet-4-6")?.mode).toBe("openai");
+  });
+
+  test("mode=openai + 未知 rectifier name → warn + silent no-op", () => {
+    // warn log side-effect verified manually; here we only check no rect mounted
+    const reg = buildRegistry(
+      makeProfile({ mode: "openai", rectifier: "nonexistent-rule" }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
   });
 });
 

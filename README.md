@@ -73,14 +73,19 @@ The sidecar listens on `127.0.0.1:3133` (or next free port) and is torn down whe
 
 ## Built-in rectifier presets
 
-Available when adding a profile in `rectify` mode — the wizard shows a single-select picker with one entry per rule:
+The wizard shows a mode-aware single-select picker. Same vendor name may resolve to a different rule body depending on the profile's `mode`:
 
-- **opencode-go** — adds an `Authorization: Bearer <apiKey>` header alongside the default `x-api-key` (fixes 401 on OpenCode Go)
-- **kimi** — normalizes `thinking.type` to the supported string values (fixes 400 on Kimi thinking effort)
+- **rectify mode** (anthropic-protocol sidecar → upstream):
+  - **opencode-go** — adds an `Authorization: Bearer <apiKey>` header alongside the default `x-api-key` (fixes 401 on OpenCode Go)
+  - **kimi** — normalizes `thinking.type` to the supported string values (fixes 400 on Kimi thinking effort)
+- **openai mode** (anthropic → openai-converted → upstream):
+  - **opencode-go** — drops `thinking` when `reasoning_effort` is also set (avoids opencode-go's chat-completions endpoint returning HTTP 400 "cannot specify both")
+
+Why split: cclau's openai mode routes to opencode-go's chat-completions endpoint, which has different protocol quirks than its anthropic-messages endpoint. Each vendor name is a single namespace entry point; the actual hook surface is mode-dependent.
 
 Default-mode heuristic: when you pick a vendor with its own rule (OpenCode Go, Kimi), the wizard pre-selects `rectify` so the rule picker actually appears in the next step — and the matching rule is pre-selected there too (press Enter twice to accept both). Vendors without a dedicated rule (DeepSeek, MiniMax, MiMo) default to `direct`. Custom vendors leave the mode picker open.
 
-In the rule picker you can also pick any other rule from the list to borrow a workaround for a different vendor's quirk. To skip entirely, choose `none (no rectifier)`; you can also hand-edit TOML afterwards.
+In the rule picker you can also pick any other rule from the list to borrow a workaround for a different vendor's quirk. To skip entirely, choose `none (no rectifier)`; you can also hand-edit TOML afterwards. A name that's listed for rectify but not for openai mode silently does nothing if the profile's mode doesn't apply to it (no error).
 
 ## Configuration file
 

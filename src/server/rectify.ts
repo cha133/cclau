@@ -7,12 +7,15 @@ import type {
   AnthropicRequest,
   AnthropicResponse,
   AnthropicStreamEvent,
+  OpenAIRequest,
+  OpenAIResponse,
+  OpenAIStreamChunk,
   Rectifier,
 } from "../types.js";
 
 export const NO_OP_RECTIFIER: Rectifier = {};
 
-export type RectifierPhase = "anthropic-in" | "anthropic-out";
+export type RectifierPhase = "anthropic-in" | "anthropic-out" | "openai-in" | "openai-out";
 
 export interface RectifierContext {
   phase: RectifierPhase;
@@ -26,18 +29,30 @@ export interface RectifierContext {
  */
 export function applyRectifier(rect: Rectifier, ctx: RectifierContext): unknown {
   const a = rect.anthropic;
-  if (!a) return ctx.payload;
-
-  let payload = ctx.payload;
-
-  if (ctx.phase === "anthropic-in" && a.requestTransform) {
-    payload = a.requestTransform(payload as AnthropicRequest);
+  if (a) {
+    let payload = ctx.payload;
+    if (ctx.phase === "anthropic-in" && a.requestTransform) {
+      payload = a.requestTransform(payload as AnthropicRequest);
+    }
+    if (ctx.phase === "anthropic-out" && a.responseTransform) {
+      payload = a.responseTransform(payload as AnthropicResponse);
+    }
+    return payload;
   }
-  if (ctx.phase === "anthropic-out" && a.responseTransform) {
-    payload = a.responseTransform(payload as AnthropicResponse);
+
+  const o = rect.openai;
+  if (o) {
+    let payload = ctx.payload;
+    if (ctx.phase === "openai-in" && o.requestTransform) {
+      payload = o.requestTransform(payload as OpenAIRequest);
+    }
+    if (ctx.phase === "openai-out" && o.responseTransform) {
+      payload = o.responseTransform(payload as OpenAIResponse);
+    }
+    return payload;
   }
 
-  return payload;
+  return ctx.payload;
 }
 
 /**
@@ -51,6 +66,20 @@ export function applyStreamRectifier(
   const fn = rect.anthropic?.streamChunkTransform;
   if (!fn) return events;
   return events.map(fn);
+}
+
+/**
+ * Apply openai rectifier per-chunk in streaming scenarios.
+ * OpenAI chat-completion chunk array → processed chunk array. Used in the
+ * convert path (openai upstream). Unknown shape / no rectifier → identity.
+ */
+export function applyOpenAIStreamRectifier(
+  rect: Rectifier,
+  chunks: OpenAIStreamChunk[],
+): OpenAIStreamChunk[] {
+  const fn = rect.openai?.streamChunkTransform;
+  if (!fn) return chunks;
+  return chunks.map(fn);
 }
 
 // Type guard helper

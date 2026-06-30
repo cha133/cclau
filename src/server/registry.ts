@@ -9,7 +9,10 @@
 // endpoint + apiKey + model, no ambiguity across profiles (profile name is the namespace).
 
 import type { Mode, Profile, Rectifier } from "../types.js";
-import { resolveRectifierByName } from "../preset-rules.js";
+import {
+  resolveOpenAIRectifierByName,
+  resolveRectifierByName,
+} from "../preset-rules.js";
 import { strip1m } from "../core/model-1m.js";
 import { warn } from "../ui/format.js";
 
@@ -20,7 +23,7 @@ export interface RouteEntry {
   mode: Mode;
   /** model id passed through to upstream (bare base name) */
   model: string;
-  /** only mounted in rectify mode; undefined in direct / openai modes */
+  /** Anthropic-protocol rectifier (rectify mode only). */
   rectifier?: Rectifier;
 }
 
@@ -45,20 +48,33 @@ export function buildRegistry(profile: Profile): Registry {
     mode: profile.mode,
     model: profile.model,
   };
-  // mount rectifier only in rectify mode; direct / openai skip it.
+
   // profile.rectifier is an opaque name (e.g. "opencode-go") — resolve to
-  // the concrete AnthropicRectifier via BUILTIN_PRESETS. Unknown names fall
-  // through to no-op + warn so hand-edited TOML typos are loud, not silent.
-  if (profile.mode === "rectify" && profile.rectifier) {
-    const resolved = resolveRectifierByName(profile.rectifier);
-    if (resolved) {
-      entry.rectifier = { anthropic: resolved };
-    } else {
-      warn(
-        `profile "${profile.name}": unknown rectifier "${profile.rectifier}" (ignored; check BUILTIN_PRESETS in src/preset-rules.ts)`,
-      );
+  // the concrete rectifier for the current mode. Same name may resolve to
+  // different rules per mode (e.g. "opencode-go" → auth header in rectify,
+  // drop-thinking in openai). Unknown names fall through to no-op + warn so
+  // hand-edited TOML typos are loud, not silent.
+  const rectName = profile.rectifier;
+  if (rectName) {
+    if (profile.mode === "rectify") {
+      const resolved = resolveRectifierByName(rectName);
+      if (resolved) entry.rectifier = { anthropic: resolved };
+      else warn(routerUnknownRectifierWarning(profile.name, rectName, "rectify"));
+    } else if (profile.mode === "openai") {
+      const resolved = resolveOpenAIRectifierByName(rectName);
+      if (resolved) entry.rectifier = { openai: resolved };
+      else warn(routerUnknownRectifierWarning(profile.name, rectName, "openai"));
     }
+    // direct mode: no rectifier applies; silently skip
   }
   reg.set(strip1m(profile.model), entry);
   return reg;
+}
+
+function routerUnknownRectifierWarning(
+  profileName: string,
+  rectName: string,
+  mode: Mode,
+): string {
+  return `profile "${profileName}": unknown rectifier "${rectName}" for mode ${mode} (ignored; check BUILTIN_PRESETS${mode === "openai" ? "_OPENAI" : ""} in src/preset-rules.ts)`;
 }

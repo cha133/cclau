@@ -10,7 +10,7 @@
 //
 // Add a new rule: export a preset constant here + add it to BUILTIN_PRESETS.
 
-import type { AnthropicRectifier, AnthropicRequest } from "./types.js";
+import type { AnthropicRectifier, AnthropicRequest, OpenAIRequest } from "./types.js";
 
 /**
  * Sentinel for requestHeaders values: when a header value equals this string,
@@ -78,6 +78,84 @@ export function resolveRectifierByName(
 ): AnthropicRectifier | undefined {
   if (!name) return undefined;
   return BUILTIN_PRESETS[name];
+}
+
+// ============================================================================
+// OpenAI-mode rectifier presets (openai → upstream in chat-completions shape)
+// ============================================================================
+//
+// Distinct from the anthropic BUILTIN_PRESETS above: same name space (vendor
+// name = rule key) but different hook surface. resolveOpenAIRectifierByName
+// looks up here; resolveRectifierByName looks up the anthropic dict.
+//
+// Per plan B (dual-mode per vendor name): when user picks vendor "opencode-go"
+// + rectifier "opencode-go", the lookup is mode-aware:
+//   - rectify mode  → anthropic rule (auth header)
+//   - openai mode   → openai rule (drop thinking when reasoning_effort present)
+//
+// v1 ships 1 openai rule:
+//   1. opencode-go: drop `thinking` when `reasoning_effort` is also present
+//      (avoids HTTP 400 from opencode-go's chat-completions endpoint, which
+//      rejects both fields together. Applies to kimi / deepseek / glm / etc.
+//      all routed through opencode-go, not glm-specific.)
+
+/**
+ * opencode-go (openai mode): drop `thinking` when `reasoning_effort` is set.
+ *
+ * Pain point: opencode-go's chat-completions endpoint rejects requests with
+ * both `thinking` and `reasoning_effort` set (HTTP 400 "cannot specify
+ * both"). This affects every model routed through opencode-go (kimi,
+ * deepseek, glm, etc.) when used in openai mode — not glm-specific.
+ *
+ * Strategy: claude-code converts `output_config.effort` into an
+ * `reasoning_effort` field in openai mode. When that's present, drop
+ * `thinking` from the openai payload so upstream accepts the request.
+ * reasoning_effort alone still controls reasoning depth.
+ */
+export const OPENCODE_GO_OPENAI_PRESET = {
+  requestTransform: (req: OpenAIRequest): OpenAIRequest => {
+    if (req.reasoning_effort === undefined) return req;
+    if (req.thinking === undefined) return req;
+    // Drop `thinking`, keep everything else verbatim.
+    const { thinking: _drop, ...rest } = req;
+    void _drop;
+    return rest;
+  },
+};
+
+/** preset name → default OpenAI-protocol rectifier. Same name space as the
+ *  anthropic BUILTIN_PRESETS dict above but indexed separately. */
+export const BUILTIN_PRESETS_OPENAI: Record<
+  string,
+  { requestTransform?: (req: OpenAIRequest) => OpenAIRequest }
+> = {
+  "opencode-go": OPENCODE_GO_OPENAI_PRESET,
+};
+
+/**
+ * Wizard UI metadata for openai-mode rules. Keys MUST stay aligned 1:1
+ * with `BUILTIN_PRESETS_OPENAI` (consumed by promptAdd's rectifier picker
+ * to render the p.select options in openai mode). When you add a new rule
+ * to BUILTIN_PRESETS_OPENAI, add a matching entry here too — preset-rules
+ * tests enforce alignment.
+ */
+export const RULE_DEFS_OPENAI: Record<string, { label: string; hint: string }> = {
+  "opencode-go": {
+    label: "opencode-go — drop thinking on effort",
+    hint: "drop `thinking` when `reasoning_effort` is set (avoids upstream 400)",
+  },
+};
+
+/**
+ * Resolve a profile-level rectifier name to the OpenAI-protocol rectifier.
+ * Unknown names return undefined (silent no-op); caller decides whether to
+ * log/warn.
+ */
+export function resolveOpenAIRectifierByName(
+  name: string | undefined,
+): { requestTransform?: (req: OpenAIRequest) => OpenAIRequest } | undefined {
+  if (!name) return undefined;
+  return BUILTIN_PRESETS_OPENAI[name];
 }
 
 /**

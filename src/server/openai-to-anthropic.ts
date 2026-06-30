@@ -12,9 +12,10 @@ import type {
   OpenAIStreamChunk,
   OpenAITool,
   OpenAIToolChoice,
+  Rectifier,
 } from "../types.js";
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
-import { applyRectifier } from "./rectify.js";
+import { applyOpenAIStreamRectifier, applyRectifier } from "./rectify.js";
 import { UpstreamError } from "./anthropic-passthrough.js";
 import { getDebugLogger } from "./debug.js";
 
@@ -22,6 +23,9 @@ interface UpstreamCtx {
   endpoint: string;
   apiKey: string;
   model: string;
+  /** Openai-mode rectifier (resolved from profile.rectifier at registry build).
+   *  undefined means no openai-mode rule for this profile (most common). */
+  rect?: Rectifier;
 }
 
 // ============================================================================
@@ -404,7 +408,14 @@ export async function* convertOpenAIStreamToAnthropic(
 // ============================================================================
 
 export async function handleConvert(req: AnthropicRequest, ctx: UpstreamCtx): Promise<AnthropicResponse> {
-  const openaiReq = anthropicToOpenAI(req, ctx.model);
+  let openaiReq = anthropicToOpenAI(req, ctx.model);
+
+  // openai-in rectification (per-profile vendor rules; e.g. opencode-go drops
+  // `thinking` when reasoning_effort is set, otherwise upstream 400s).
+  openaiReq = applyRectifier(ctx.rect ?? {}, {
+    phase: "openai-in",
+    payload: openaiReq,
+  }) as OpenAIRequest;
 
   const upstreamUrl = buildUpstreamUrl(ctx.endpoint, "openai");
   const reqHeaders: Record<string, string> = {
@@ -425,15 +436,12 @@ export async function handleConvert(req: AnthropicRequest, ctx: UpstreamCtx): Pr
     throw new UpstreamError(upstreamRes.status, errText);
   }
 
-  const upstreamBody = (await upstreamRes.json()) as OpenAIResponse;
-  // anthropic-out rectification (v0: usually no-op, but keep interface consistent)
-  const outTransformed = applyRectifier(
-    { anthropic: undefined }, // v0: convert mode carries no anthropic rectifier
-    { phase: "anthropic-out", payload: null },
-  );
-  // Note: convert mode actually gets OpenAI responses back, no anthropic rectification needed;
-  // keeping the interface call for alignment
-  void outTransformed;
+  let upstreamBody = (await upstreamRes.json()) as OpenAIResponse;
+  // openai-out rectification (per-profile vendor rules on the openai wire)
+  upstreamBody = applyRectifier(ctx.rect ?? {}, {
+    phase: "openai-out",
+    payload: upstreamBody,
+  }) as OpenAIResponse;
 
   return openAIToAnthropic(upstreamBody, req.model);
 }
@@ -442,7 +450,13 @@ export async function* handleConvertStream(
   req: AnthropicRequest,
   ctx: UpstreamCtx,
 ): AsyncGenerator<string, void, void> {
-  const openaiReq = anthropicToOpenAI(req, ctx.model);
+  let openaiReq = anthropicToOpenAI(req, ctx.model);
+
+  // openai-in rectification (per-profile vendor rules)
+  openaiReq = applyRectifier(ctx.rect ?? {}, {
+    phase: "openai-in",
+    payload: openaiReq,
+  }) as OpenAIRequest;
 
   const upstreamUrl = buildUpstreamUrl(ctx.endpoint, "openai");
   const reqHeaders: Record<string, string> = {
@@ -519,7 +533,25 @@ export async function* handleConvertStream(
     },
   };
 
-  for await (const sse of convertOpenAIStreamToAnthropic(chunkIterable, req.model)) {
+  // Wrap the chunk iterable so each upstream chunk flows through the
+  // openai-mode streamChunkTransform before being converted to anthropic
+  // SSE. Identity when no openai rect is mounted.
+  const rect = ctx.rect ?? {};
+  const rectifiedChunks: AsyncIterable<OpenAIStreamChunk> = {
+    [Symbol.asyncIterator]() {
+      const inner = chunkIterable[Symbol.asyncIterator]();
+      return {
+        async next(): Promise<IteratorResult<OpenAIStreamChunk>> {
+          const r = await inner.next();
+          if (r.done) return r;
+          const processed = applyOpenAIStreamRectifier(rect, [r.value]);
+          return { value: processed[0] ?? r.value, done: false };
+        },
+      };
+    },
+  };
+
+  for await (const sse of convertOpenAIStreamToAnthropic(rectifiedChunks, req.model)) {
     yield sse;
   }
 

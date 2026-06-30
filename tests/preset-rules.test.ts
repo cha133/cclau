@@ -9,9 +9,13 @@ import { describe, test, expect } from "bun:test";
 import {
   BEARER_APIKEY_SENTINEL,
   OPENCODE_GO_PRESET,
+  OPENCODE_GO_OPENAI_PRESET,
   KIMI_PRESET,
   BUILTIN_PRESETS,
+  BUILTIN_PRESETS_OPENAI,
   RULE_DEFS,
+  RULE_DEFS_OPENAI,
+  resolveOpenAIRectifierByName,
   resolveRectifierByName,
   resolvePresetHeaders,
 } from "../src/preset-rules.js";
@@ -202,5 +206,100 @@ describe("resolveRectifierByName — profile 名 → AnthropicRectifier", () => 
   test("undefined / 空串 → undefined", () => {
     expect(resolveRectifierByName(undefined)).toBeUndefined();
     expect(resolveRectifierByName("")).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// OpenAI-mode presets — dual-mode per plan B (plan A 撤回)
+// ============================================================================
+
+describe("BUILTIN_PRESETS_OPENAI 字典 + 常量", () => {
+  test('"opencode-go" → OPENCODE_GO_OPENAI_PRESET（同一引用）', () => {
+    expect(BUILTIN_PRESETS_OPENAI["opencode-go"]).toBe(OPENCODE_GO_OPENAI_PRESET);
+  });
+
+  test("未知 preset 名 → undefined", () => {
+    expect(BUILTIN_PRESETS_OPENAI["nonexistent"]).toBeUndefined();
+    expect(BUILTIN_PRESETS_OPENAI[""]).toBeUndefined();
+  });
+});
+
+describe("OPENCODE_GO_OPENAI_PRESET.requestTransform — drop thinking when reasoning_effort", () => {
+  const transform = OPENCODE_GO_OPENAI_PRESET.requestTransform!;
+  const baseReq = {
+    model: "glm-5.2",
+    messages: [{ role: "user" as const, content: "hi" }],
+  };
+
+  test("only thinking present（无 reasoning_effort）→ 原样透传", () => {
+    const req = { ...baseReq, thinking: { type: "enabled" as const } };
+    const out = transform(req);
+    expect(out).toEqual(req);
+  });
+
+  test("only reasoning_effort present（无 thinking）→ 原样透传", () => {
+    const req = { ...baseReq, reasoning_effort: "high" };
+    const out = transform(req);
+    expect(out).toEqual(req);
+  });
+
+  test("thinking + reasoning_effort 同时 → drop thinking，保留 effort", () => {
+    const req = {
+      ...baseReq,
+      thinking: { type: "enabled" as const },
+      reasoning_effort: "max",
+    };
+    const out = transform(req);
+    expect(out).toEqual({ ...baseReq, reasoning_effort: "max" });
+    expect((out as { thinking?: unknown }).thinking).toBeUndefined();
+  });
+
+  test("两者都无 → 原样透传", () => {
+    const out = transform(baseReq);
+    expect(out).toEqual(baseReq);
+  });
+
+  test("drop 后其他字段（messages / temperature / tools）原样保留", () => {
+    const req = {
+      ...baseReq,
+      thinking: { type: "enabled" as const },
+      reasoning_effort: "high",
+      temperature: 0.7,
+      max_tokens: 1024,
+    };
+    const out = transform(req);
+    expect((out as { temperature?: number }).temperature).toBe(0.7);
+    expect((out as { max_tokens?: number }).max_tokens).toBe(1024);
+    expect((out as { messages?: unknown }).messages).toEqual(baseReq.messages);
+  });
+});
+
+describe("resolveOpenAIRectifierByName — registry build helper", () => {
+  test('"opencode-go" → OPENCODE_GO_OPENAI_PRESET（同一引用）', () => {
+    expect(resolveOpenAIRectifierByName("opencode-go")).toBe(OPENCODE_GO_OPENAI_PRESET);
+  });
+
+  test("未知名字 → undefined", () => {
+    expect(resolveOpenAIRectifierByName("nonexistent")).toBeUndefined();
+  });
+
+  test("undefined / 空串 → undefined", () => {
+    expect(resolveOpenAIRectifierByName(undefined)).toBeUndefined();
+    expect(resolveOpenAIRectifierByName("")).toBeUndefined();
+  });
+});
+
+describe("RULE_DEFS_OPENAI — wizard UI metadata", () => {
+  test("keys 1:1 对齐 BUILTIN_PRESETS_OPENAI（多/漏都会让单选框错位）", () => {
+    expect(Object.keys(RULE_DEFS_OPENAI).sort()).toEqual(Object.keys(BUILTIN_PRESETS_OPENAI).sort());
+  });
+
+  test("每条 entry 都填了非空 label 和 hint", () => {
+    for (const def of Object.values(RULE_DEFS_OPENAI)) {
+      expect(def.label).toBeString();
+      expect(def.label.length).toBeGreaterThan(0);
+      expect(def.hint).toBeString();
+      expect(def.hint.length).toBeGreaterThan(0);
+    }
   });
 });

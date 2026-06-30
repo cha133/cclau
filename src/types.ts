@@ -51,7 +51,9 @@ export interface Config {
 // ============================================================================
 
 /**
- * Anthropic-protocol rectifier (v0: only one actually used)
+ * Anthropic-protocol rectifier (used by rectify mode: sidecar → upstream in
+ * anthropic-messages shape). The 5 hooks mirror applyRectifier's phase
+ * pipeline (anthropic-in / anthropic-out + stream chunk).
  */
 export interface AnthropicRectifier {
   modelAlias?: Record<string, string>;
@@ -61,9 +63,27 @@ export interface AnthropicRectifier {
   streamChunkTransform?: (chunk: AnthropicStreamEvent) => AnthropicStreamEvent;
 }
 
-/** Rectifier config (v0 only exposes anthropic) */
+/**
+ * OpenAI-protocol rectifier (used by openai mode: sidecar converts anthropic
+ * → openai upstream, this rectifier runs on the openai-shaped wire).
+ *
+ * `requestTransform` runs after anthropicToOpenAI; `responseTransform` /
+ * `streamChunkTransform` run before openAIToAnthropic (i.e. on raw openai
+ * chunks, not anthropic-shaped).
+ */
+export interface OpenAIRectifier {
+  requestTransform?: (req: OpenAIRequest) => OpenAIRequest;
+  responseTransform?: (res: OpenAIResponse) => OpenAIResponse;
+  streamChunkTransform?: (chunk: OpenAIStreamChunk) => OpenAIStreamChunk;
+}
+
+/** Rectifier config: each mode has its own rectifier slot, mounted only in
+ *  that mode. A profile declaring `rectifier = "glm"` (openai-only rule) in
+ *  rectify mode is silently ignored — registry boot does not error.
+ */
 export interface Rectifier {
   anthropic?: AnthropicRectifier;
+  openai?: OpenAIRectifier;
 }
 
 // ============================================================================

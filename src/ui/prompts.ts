@@ -28,7 +28,12 @@
 
 import * as p from "@clack/prompts";
 import { BUILTIN_PRESETS, CUSTOM_PRESET, findPreset, type BuiltinPreset } from "../builtins.js";
-import { BUILTIN_PRESETS as PRESET_RULES, RULE_DEFS } from "../preset-rules.js";
+import {
+  BUILTIN_PRESETS as PRESET_RULES,
+  BUILTIN_PRESETS_OPENAI,
+  RULE_DEFS,
+  RULE_DEFS_OPENAI,
+} from "../preset-rules.js";
 import { listProfileNames, listProfiles } from "../config.js";
 import type { Mode, Profile } from "../types.js";
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
@@ -378,26 +383,33 @@ async function promptName(opts: {
 const NO_RECTIFIER_SENTINEL = "__cclau_no_rectifier__";
 
 /**
- * Single-select rectifier picker, only relevant for rectify mode.
+ * Single-select rectifier picker, mode-aware.
  *
- * Lists every rule in PRESET_RULES (label/hint from RULE_DEFS) plus a "none"
- * option. The picked vendor's matching rule is pre-selected so the common
- * case is "Enter to confirm"; custom vendors and vendors with no dedicated
- * rule default to "none" but can still hand-pick any other rule.
+ * In rectify mode: lists rules from `PRESET_RULES` (anthropic-protocol
+ * rectifiers). In openai mode: lists rules from `BUILTIN_PRESETS_OPENAI`.
+ * Each mode's rules are addressed by the same vendor name (plan B: dual-mode
+ * per vendor) but resolve to different rule bodies — e.g. "opencode-go" in
+ * rectify adds auth header, in openai drops thinking.
+ *
+ * The picked vendor's matching rule in the active mode is pre-selected so
+ * the common case is "Enter to confirm"; custom vendors and vendors with
+ * no dedicated rule in the active mode default to "none" but can still
+ * hand-pick any other rule.
  *
  * Returns the selected rule name, or undefined if the user picked "none"
- * (or mode isn't rectify, or there are no rules to choose from).
- *
- * Design note: each vendor is expected to ship its own rule; the open
- * picker is here so a "cold" vendor (no rule of its own) can still borrow
- * a rule from a "hot" vendor that solves the same upstream quirk.
+ * (or mode isn't rectify/openai, or there are no rules to choose from).
  */
 async function pickBuiltinRectifier(
   preset: BuiltinPreset,
   mode: Mode,
 ): Promise<string | undefined> {
-  if (mode !== "rectify") return undefined;
-  const ruleNames = Object.keys(PRESET_RULES);
+  // Mode-aware rule lookup: same vendor name, different rule body per mode.
+  const rulesByMode =
+    mode === "openai" ? BUILTIN_PRESETS_OPENAI : mode === "rectify" ? PRESET_RULES : null;
+  if (!rulesByMode) return undefined;
+  const defsByMode = mode === "openai" ? RULE_DEFS_OPENAI : RULE_DEFS;
+
+  const ruleNames = Object.keys(rulesByMode);
   if (ruleNames.length === 0) return undefined;
 
   const options: Array<{ value: string; label: string; hint?: string }> = [
@@ -407,7 +419,7 @@ async function pickBuiltinRectifier(
       hint: "skip — wire nothing; you can hand-edit TOML later",
     },
     ...ruleNames.map((name) => {
-      const def = RULE_DEFS[name];
+      const def = defsByMode[name];
       return {
         value: name,
         label: def?.label ?? name,
@@ -416,8 +428,8 @@ async function pickBuiltinRectifier(
     }),
   ];
 
-  // Default = preset's own rule if it exists, else "none".
-  const initialValue = PRESET_RULES[preset.name] ? preset.name : NO_RECTIFIER_SENTINEL;
+  // Default = preset's own rule in this mode if it exists, else "none".
+  const initialValue = rulesByMode[preset.name] ? preset.name : NO_RECTIFIER_SENTINEL;
 
   const result = checkCancel(
     await p.select<string>({
