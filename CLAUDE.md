@@ -40,7 +40,7 @@ tests/e2e/               # sidecar-routing integration tests (real Bun.serve)
 - **Runtime**: Bun only (>= 1.0). Never use node / npm.
 - **Language**: TypeScript with `strict` + `noUncheckedIndexedAccess`.
 - **Tests**: `bun test` runs `tests/*.test.ts`. No third-party test framework. Use `CCLAU_CONFIG` env var to redirect config path for isolation.
-- **Config**: TOML via `smol-toml`. Schema is a single `[profiles.<name>]` table.
+- **Config**: TOML via `smol-toml`. Schema is an optional top-level `default = "<profile-name>"` key plus a `[profiles.<name>]` table per profile.
 - **CLI deps**: `commander`, `smol-toml`, `picocolors`, `@clack/prompts` (add / edit wizards only).
 - **User-facing language**: English (errors, help text, comments). Commit messages: mixed English + Chinese OK.
 
@@ -75,9 +75,11 @@ These are load-bearing — do not change without updating tests in lockstep.
 
 5. **Rectifier mounts only in rectify mode** — `entry.rectifier` is `undefined` for `direct` and `openai`. `__CCLAU_BEARER_APIKEY__` is a sentinel in TOML that the runtime substitutes with `profile.apiKey` at request time — keeps secrets out of disk.
 
-6. **Default profile mechanism** — at most one profile can have `default: true`. `cclau default <name>` sets it and clears others atomically. `cclau default` (no arg) prints the active name (nvm-style). If the current default is removed, the alphabetically-first remaining profile is auto-promoted; if none remain, the default is cleared.
+6. **Global default key** — TOML has an optional top-level `default = "<profile-name>"` key referencing one profile name. Single source of truth, so multi-default cannot occur. `cclau default <name>` writes this key (fuzzy-resolves, validates the profile exists to prevent dangling writes). `cclau default` (no arg) prints the active name. If the referenced profile is removed, the alphabetically-first remaining profile is auto-promoted; if none remain, the `default` key is left stale (not cleared) so the next `cclau add` can overwrite it via the lazy-resolve trigger.
 
-7. **First add becomes default** — `cclau add` marks the new profile `default: true` IFF it's the first profile ever added. Subsequent adds leave the existing default alone. Removing a non-default profile does not change which is default.
+7. **First add becomes default** — `cclau add` sets the top-level `default` to the new profile IFF `getDefaultProfile()` (lazy-resolve) returns undefined. The trigger counts dangling references as unset. Subsequent adds leave the existing global `default` alone. Removing a non-default profile does not change the global `default`.
+
+8. **Legacy config detection** — TOML files containing the old per-profile `default = true` field (pre-global-default schema) are rejected at `loadAppConfig` with a `LegacyConfigError` carrying a copy-paste migration message. No automatic migration; user runs `cclau default <name>` once after hand-deleting the old `default = true` lines.
 
 ## Adding a new vendor preset
 

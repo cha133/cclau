@@ -1,13 +1,11 @@
 // cclau edit <name> - entry point for the edit wizard
 //
 // Real interactive flow lives in src/ui/prompts.ts::promptEdit().
-// This file is a thin wrapper: fuzzy-resolve name → run wizard → if anything
-// changed, clear other profiles' default flag (when promoting this one) and
-// persist.
+// This file is a thin wrapper: fuzzy-resolve name → run wizard → persist.
+// `default` is global and not editable here; use `cclau default <name>` to switch.
 
 import {
   getProfile,
-  listProfiles,
   listProfileNames,
   upsertProfile,
 } from "../config.js";
@@ -42,18 +40,6 @@ export async function editCmd(name: string): Promise<void> {
       return;
     }
 
-    // Default cascade: clear other profiles' default flag
-    if (updated.default === true) {
-      for (const prof of listProfiles()) {
-        if (prof.name !== updated.name && prof.default === true) {
-          const cleared: Profile = { ...prof };
-          delete cleared.default;
-          cleared.updatedAt = Date.now();
-          await upsertProfile(cleared);
-        }
-      }
-    }
-
     await upsertProfile(updated);
     success(`saved profile "${updated.name}"`);
   } catch (err) {
@@ -68,7 +54,6 @@ function isChanged(a: Profile, b: Profile): boolean {
     a.apiKey !== b.apiKey ||
     a.mode !== b.mode ||
     a.model !== b.model ||
-    a.supports1m !== b.supports1m ||
-    (a.default === true) !== (b.default === true)
+    a.supports1m !== b.supports1m
   );
 }

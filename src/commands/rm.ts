@@ -2,18 +2,19 @@
 //
 // fuzzy + ambiguity protection: rm is irreversible, reject on top-1/top-2 score gap < threshold.
 // If the removed profile was the default, auto-promote the first remaining one
-// (sorted by name) to keep `cclau` (no args) usable.
+// (sorted by name) to keep `cclau` (no args) usable. If no profiles remain,
+// leave the global `default` key stale — the next `cclau add` overwrites it
+// via the lazy-resolve auto-default trigger.
 
 import {
-  getProfile,
+  getDefaultName,
   listProfileNames,
   listProfiles,
   removeProfile,
-  upsertProfile,
+  setDefault,
 } from "../config.js";
 import { fuzzyTopN, isAmbiguous } from "../fuzzy.js";
 import { success, error, info, pc } from "../ui/format.js";
-import type { Profile } from "../types.js";
 
 export async function rmCmd(name: string): Promise<void> {
   try {
@@ -33,7 +34,7 @@ export async function rmCmd(name: string): Promise<void> {
     if (resolved !== name) info(`matched profile "${pc.dim(resolved)}"`);
 
     // Capture default state BEFORE removal (we need it for fallback logic)
-    const wasDefault = getProfile(resolved)?.default === true;
+    const wasDefault = getDefaultName() === resolved;
 
     const ok = await removeProfile(resolved);
     if (!ok) {
@@ -43,21 +44,16 @@ export async function rmCmd(name: string): Promise<void> {
 
     success(`removed profile "${resolved}"`);
 
-    // If the removed profile was the default, auto-promote first remaining (by name).
-    // listProfiles() returns sorted by name, so [0] is the deterministic fallback.
     if (wasDefault) {
       const remaining = listProfiles();
       if (remaining.length > 0) {
         const fallback = remaining[0]!;
-        const updated: Profile = {
-          ...fallback,
-          default: true,
-          updatedAt: Date.now(),
-        };
-        await upsertProfile(updated);
+        await setDefault(fallback.name);
         info(`auto-promoted "${fallback.name}" as new default`);
       } else {
-        info(`no profiles left — add a new one and run \`cclau default <name>\` after`);
+        // Stale default reference is intentional — next `cclau add` will
+        // see getDefaultProfile() === undefined (lazy) and overwrite.
+        info(`no profiles left — next \`cclau add\` will become default`);
       }
     }
   } catch (err) {

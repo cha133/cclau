@@ -2,8 +2,13 @@
 //
 // Data model (refactored, single profile flattened):
 //   - Mode: "openai" | "direct" | "rectify"
-//   - Profile: name + endpoint + apiKey + mode + model + supports1m + optional default
-//   - Config: { profiles: Record<name, StoredProfile> }
+//   - Profile: name + endpoint + apiKey + mode + model + supports1m + optional rectifier
+//   - Config: { default?: <profile-name>, profiles: Record<name, StoredProfile> }
+//
+// The active/default profile is referenced by NAME at the top level (single source
+// of truth). Multi-default cannot occur — there is one key. Dangling references
+// (default name with no matching profile) are tolerated by reads (lazy-resolve to
+// undefined) but no command writes them.
 //
 // Provider / multi-tier / alias concepts all removed.
 
@@ -20,7 +25,6 @@ export interface Profile {
   mode: Mode;
   model: string;
   supports1m: boolean;
-  default?: boolean;
   /**
    * Only effective in rectify mode. Auto-filled by builtin preset, or hand-edited TOML.
    * Ignored in direct / openai modes.
@@ -34,6 +38,8 @@ export interface Profile {
 export type StoredProfile = Omit<Profile, "name">;
 
 export interface Config {
+  /** Profile name; undefined = no default. Dangling references are tolerated. */
+  default?: string;
   profiles: Record<string, StoredProfile>;
 }
 

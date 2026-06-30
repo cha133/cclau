@@ -500,10 +500,13 @@ export async function promptAdd(): Promise<Profile> {
 
 /**
  * 交互式编辑一个 profile。按固定顺序走 endpoint → apiKey → mode →
- * model → 1m → default，每步 `initialValue` pre-fill 当前值。除了
- * `endpoint / apiKey / mode / model / supports1m / default` 之外的字段
- * （`name / vendor / rectifier / createdAt`）一律 frozen，wizard 一开始
- * 用 console.log 把它们打出来让用户知道不可改。
+ * model → 1m，每步 `initialValue` pre-fill 当前值。除了
+ * `endpoint / apiKey / mode / model / supports1m` 之外的字段
+ * （`name / vendor / rectifier / createdAt` / **全局 default**）一律
+ * frozen，wizard 一开始用 console.log 把不可改字段打出来。
+ *
+ * Global `default` is NOT editable here — use `cclau default <name>` to
+ * switch the active profile.
  */
 export async function promptEdit(existing: Profile): Promise<Profile> {
   console.log("");
@@ -537,15 +540,7 @@ export async function promptEdit(existing: Profile): Promise<Profile> {
   // 6. 1M
   const supports1m = await prompt1m(model, existing.supports1m);
 
-  // 7. Default
-  const wantsDefault = checkCancel(
-    await p.confirm({
-      message: "Set as default profile?",
-      initialValue: existing.default === true,
-    }),
-  );
-
-  // 8. Build & return
+  // 7. Build & return
   const updated: Profile = {
     name: existing.name,
     endpoint,
@@ -558,10 +553,5 @@ export async function promptEdit(existing: Profile): Promise<Profile> {
     // rectifier 原样保留，wizard 不让改 → hand-edit TOML
     ...(existing.rectifier ? { rectifier: existing.rectifier } : {}),
   };
-  if (wantsDefault) {
-    updated.default = true;
-  } else {
-    delete updated.default;
-  }
   return updated;
 }

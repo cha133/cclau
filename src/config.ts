@@ -1,6 +1,16 @@
 // TOML config read/write
 //
-// Refactored: a single `profiles` table. Each profile carries endpoint / apiKey / mode / model / supports1m.
+// Config schema (refactored to global default):
+//   [no top-level]                          ← no default
+//   default = "<profile-name>"              ← single source of truth
+//   [profiles.<name>]
+//     endpoint / apiKey / mode / model / supports1m / createdAt / updatedAt / [rectifier]
+//
+// The active profile is referenced by name at the top level. Multi-default is
+// impossible (one key). Dangling references (cfg.default points to a profile
+// that no longer exists) are tolerated by reads (`getDefaultProfile` returns
+// undefined) and not written by any command.
+//
 // Provider / multi-tier / alias all deleted.
 
 import { writeFile, mkdir } from "node:fs/promises";
@@ -10,20 +20,57 @@ import { parse, stringify } from "smol-toml";
 import { configPath } from "./utils/paths.js";
 import type { Config, Profile, StoredProfile } from "./types.js";
 
+/**
+ * Thrown by `loadAppConfig` when the on-disk config uses the old per-profile
+ * `default = true` schema (pre-global-default). User must hand-edit to remove
+ * those lines and re-run `cclau default <name>` once.
+ *
+ * Per user decision: no automatic migration. The error message is the migration
+ * recipe.
+ */
+export class LegacyConfigError extends Error {
+  readonly offendingProfile: string;
+  constructor(offendingProfile: string) {
+    super(
+      `cclau config uses old per-profile \`default\` field (in profile "${offendingProfile}").\n` +
+        `Migrate: run \`cclau default <your-default-profile-name>\` once.\n` +
+        `For read-only inspection, hand-edit your config.toml to remove the\n` +
+        `\`default = true\` lines first.`,
+    );
+    this.name = "LegacyConfigError";
+    this.offendingProfile = offendingProfile;
+  }
+}
+
 export function loadAppConfig(): Config {
   const path = configPath();
+  let text: string;
   try {
-    const text = readFileSync(path, "utf-8");
-    if (!text.trim()) return emptyConfig();
-    const parsed = parse(text) as unknown as Config;
-    if (!parsed || typeof parsed !== "object") return emptyConfig();
-    return {
-      profiles: parsed.profiles ?? {},
-    };
+    text = readFileSync(path, "utf-8");
   } catch (err: any) {
     if (err?.code === "ENOENT") return emptyConfig();
     return emptyConfig();
   }
+  if (!text.trim()) return emptyConfig();
+
+  const parsed = parse(text) as unknown as Config | undefined;
+  if (!parsed || typeof parsed !== "object") return emptyConfig();
+
+  // Legacy detection: any per-profile `default = true` line. Run before
+  // stripping unknown keys so the offending profile name is preserved.
+  const profiles = (parsed.profiles ?? {}) as Record<string, StoredProfile>;
+  for (const [name, stored] of Object.entries(profiles)) {
+    if (stored && typeof stored === "object" && (stored as { default?: unknown }).default === true) {
+      throw new LegacyConfigError(name);
+    }
+  }
+
+  // Build config preserving top-level `default` (if any) and known profiles.
+  // Other top-level keys are intentionally dropped to keep the schema closed.
+  return {
+    default: typeof parsed.default === "string" ? parsed.default : undefined,
+    profiles,
+  };
 }
 
 function emptyConfig(): Config {
@@ -33,7 +80,12 @@ function emptyConfig(): Config {
 export async function saveAppConfig(config: Config): Promise<void> {
   const path = configPath();
   await mkdir(dirname(path), { recursive: true });
-  const toml = stringify(config as any);
+  // Insertion order: `default` first (it's the most important global state);
+  // profiles table follows. smol-toml walks Object.keys so this order is preserved.
+  const toSerialize: Record<string, unknown> = {};
+  if (config.default !== undefined) toSerialize.default = config.default;
+  toSerialize.profiles = config.profiles;
+  const toml = stringify(toSerialize as any);
   await writeFile(path, toml, { mode: 0o600 });
 }
 
@@ -45,9 +97,12 @@ function normalizeProfile(stored: StoredProfile, name: string): Profile {
     mode: stored.mode,
     model: stored.model,
     supports1m: stored.supports1m,
-    default: stored.default,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
+    // Strip any legacy `default` field silently — loadAppConfig rejects it first,
+    // but normalizeProfile runs from `getProfile` callers that may have stale
+    // configs in memory; this keeps the in-memory Profile shape pure.
+    ...(stored.rectifier ? { rectifier: stored.rectifier } : {}),
   };
 }
 
@@ -84,12 +139,59 @@ export function listProfileNames(): string[] {
   return listProfiles().map((p) => p.name);
 }
 
+// ---------------------------------------------------------------------------
+// Default (global key) — single source of truth
+// ---------------------------------------------------------------------------
+
 /**
- * Returns the first profile with default === true, or undefined.
+ * Returns the raw top-level `default` string from config, without resolving
+ * whether the referenced profile actually exists. `undefined` only when the
+ * key is absent (never set, or cleared).
  *
- * Multi-default validation is NOT done here — the config layer is just a read/write
- * of fields; the UX error belongs at launch time (Phase 4).
+ * Use this when the caller wants to know "is the key set" rather than
+ * "does the key point to a real profile". E.g. `default.ts` show-mode for
+ * displaying the literal name including dangling references.
+ */
+export function getDefaultName(): string | undefined {
+  return loadAppConfig().default;
+}
+
+/**
+ * Returns the active default Profile, or `undefined` if either:
+ *   - the top-level `default` key is absent, OR
+ *   - it is dangling (points to a profile that no longer exists).
+ *
+ * Lazy resolution — never auto-clears dangling references. Use `clearDefault`
+ * if you want to actively forget.
  */
 export function getDefaultProfile(): Profile | undefined {
-  return listProfiles().find((p) => p.default === true);
+  const name = loadAppConfig().default;
+  if (name === undefined) return undefined;
+  return getProfile(name);
+}
+
+/**
+ * Set the global default to `name`. Validates that the profile exists
+ * (prevents dangling writes). Atomic: overwrites any prior default.
+ */
+export async function setDefault(name: string): Promise<void> {
+  if (!getProfile(name)) {
+    throw new Error(`profile "${name}" does not exist`);
+  }
+  const cfg = loadAppConfig();
+  cfg.default = name;
+  await saveAppConfig(cfg);
+}
+
+/**
+ * Clear the global default (delete the top-level key). Used by `rm` when the
+ * last profile is removed and the user explicitly wants a default-less state.
+ * (In practice `rm` leaves the key stale so the next `cclau add` overwrites
+ * naturally; this helper is for explicit clearing paths.)
+ */
+export async function clearDefault(): Promise<void> {
+  const cfg = loadAppConfig();
+  if (cfg.default === undefined) return;
+  delete cfg.default;
+  await saveAppConfig(cfg);
 }

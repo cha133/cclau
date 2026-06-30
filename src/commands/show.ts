@@ -2,7 +2,7 @@
 //
 // refactored: name can only be a profile (provider concept deleted).
 
-import { getProfile, listProfileNames } from "../config.js";
+import { getDefaultName, getProfile, listProfileNames } from "../config.js";
 import { fuzzyTopN } from "../fuzzy.js";
 import type { Profile } from "../types.js";
 import { error, info, pc } from "../ui/format.js";
@@ -29,10 +29,10 @@ export function showCmd(name: string): void {
     process.exit(1);
   }
 
-  printProfile(profile);
+  printProfile(profile, getDefaultName() === profile.name);
 }
 
-function printProfile(p: Profile): void {
+function printProfile(p: Profile, isDefault: boolean): void {
   const modeColor =
     p.mode === "direct" ? pc.green : p.mode === "rectify" ? pc.yellow : pc.cyan;
   console.log(pc.bold(`Profile: ${p.name}`));
@@ -42,7 +42,7 @@ function printProfile(p: Profile): void {
   console.log(
     `  ${pc.dim("model   :")} ${formatModelWith1m(p.model, p.supports1m, pc.dim)}`,
   );
-  console.log(`  ${pc.dim("default :")} ${p.default ? pc.green("true") : "false"}`);
+  console.log(`  ${pc.dim("default :")} ${isDefault ? pc.green("true") : "false"}`);
   console.log(`  ${pc.dim("createdAt:")} ${new Date(p.createdAt).toISOString()}`);
   console.log(`  ${pc.dim("updatedAt:")} ${new Date(p.updatedAt).toISOString()}`);
 }

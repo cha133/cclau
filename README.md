@@ -31,7 +31,7 @@ cclau work -c       # launch with claude args (everything after profile name pas
 | Command | Purpose |
 |---|---|
 | `cclau add` | Interactively add a profile |
-| `cclau edit <name>` | Edit a profile (endpoint / key / mode / model / 1m / default) |
+| `cclau edit <name>` | Edit a profile (endpoint / key / mode / model / 1m) |
 | `cclau rm <name>` | Remove a profile |
 | `cclau ls` | List all profiles |
 | `cclau show <name>` | Show profile details |
@@ -82,13 +82,14 @@ Available when adding a profile in `rectify` mode:
 Path: `$XDG_CONFIG_HOME/cclau/config.toml` (defaults to `~/.config/cclau/config.toml`). Manually editable.
 
 ```toml
+default = "work"
+
 [profiles.work]
 endpoint = "https://api.deepseek.com/anthropic"
 apiKey = "sk-..."
 mode = "direct"
 model = "deepseek-chat"
 supports1m = true
-default = true
 createdAt = 1750000000000
 updatedAt = 1750000000000
 
@@ -113,9 +114,11 @@ Set `supports1m = true` and Claude Code will use the 1M context window when give
 
 ## Behavior notes
 
-- **First profile added becomes the default automatically** — `cclau` (no args) works immediately after `cclau add`. Subsequent adds do NOT auto-default; pick explicitly with `cclau default <name>`.
-- **Removing the current default profile auto-promotes the next one** (alphabetical, first by name) so `cclau` keeps working. If you remove the last profile, the default is cleared — add a new one and run `cclau default <name>` to set it.
-- **Profile fields not specified in the wizard are left at their default** — `add` always sets `supports1m` and `mode`; `edit` lets you change any of `endpoint / apiKey / mode / model / supports1m / default`. To tweak things the wizard doesn't expose, hand-edit the TOML.
+- **First profile added becomes the default automatically** — `cclau` (no args) works immediately after `cclau add`. Subsequent adds do NOT auto-default; pick explicitly with `cclau default <name>`. The trigger is lazy: a dangling `default` (references a profile that no longer exists) is treated as unset, so the next `cclau add` overwrites it.
+- **Removing the current default profile auto-promotes the next one** (alphabetical, first by name) so `cclau` keeps working. If you remove the last profile, the `default` key is left stale (pointing at the removed name) — the next `cclau add` overwrites it, or run `cclau default <name>` after to set explicitly.
+- **The default profile lives at the top of `config.toml`** as `default = "<profile-name>"` (single source of truth; multi-default cannot occur). `cclau edit` does NOT change the default — use `cclau default <other>` to switch.
+- **Profile fields not specified in the wizard are left at their default** — `add` always sets `supports1m` and `mode`; `edit` lets you change any of `endpoint / apiKey / mode / model / supports1m`. To tweak things the wizard doesn't expose, hand-edit the TOML.
+- **Upgrading from a pre-global-default config** — if you have a `default = true` line under any `[profiles.<name>]` from a previous cclau version, every command will refuse to run until you migrate. Hand-delete those `default = true` lines from your `config.toml`, then run `cclau default <your-default-name>` once.
 
 ## Development
 
