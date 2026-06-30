@@ -7,7 +7,7 @@
 import type { AnthropicRequest, AnthropicStreamEvent, Rectifier } from "../types.js";
 import { passthroughStream, passthroughUnary, UpstreamError } from "./anthropic-passthrough.js";
 import { handleConvert, handleConvertStream } from "./openai-to-anthropic.js";
-import * as p from "@clack/prompts";
+import { info, error } from "../ui/format.js";
 import type { Registry } from "./registry.js";
 import { strip1m } from "../core/model-1m.js";
 
@@ -50,7 +50,7 @@ export function startServer(registry: Registry, port: number): ServerHandle {
       ? `upstream=${[...registry.values()][0]!.endpoint}`
       : `upstream=${registry.size} endpoints`;
 
-  p.log.info(
+  info(
     `cclau server up: http://127.0.0.1:${server.port} (registry: ${registry.size} routes, ${routeHint})`,
   );
 
@@ -106,7 +106,7 @@ async function handleMessages(req: Request, registry: Registry): Promise<Respons
     if (err instanceof UpstreamError) {
       return errorResponse(err.status, err.body);
     }
-    p.log.error(`handler error: ${(err as Error).message}`);
+    error(`handler error: ${(err as Error).message}`);
     return errorResponse(500, (err as Error).message);
   }
 }

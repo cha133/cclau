@@ -12,7 +12,6 @@
 //
 // All 4 ANTHROPIC_DEFAULT_*_MODEL envs = settingsModel (single profile, no tier split).
 
-import * as p from "@clack/prompts";
 import {
   getDefaultProfile,
   getProfile,
@@ -24,7 +23,7 @@ import { resolveLaunch, writeSettingsFile } from "../settings.js";
 import { spawnClaude } from "../process.js";
 import { startServer } from "../server/index.js";
 import { buildRegistry } from "../server/registry.js";
-import { pc } from "../utils/logger.js";
+import { success, error, info, pc } from "../ui/format.js";
 
 export async function launchCmd(
   query: string,
@@ -33,29 +32,29 @@ export async function launchCmd(
   // 1. Fuzzy-resolve profile
   const all = listProfileNames();
   if (all.length === 0) {
-    p.log.error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
+    error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
     process.exit(1);
   }
 
   const top = fuzzyTopN(query, all, 2);
   if (top.length === 0) {
-    p.log.error(
+    error(
       `no profile matched "${query}". existing: ${all.join(", ")}`,
     );
     process.exit(1);
   }
   if (isAmbiguous(top)) {
-    p.log.error(
+    error(
       `"${query}" ambiguously matches multiple profiles: ${top.map((s) => s.name).join(", ")}. please use a more specific name.`,
     );
     process.exit(1);
   }
   const resolved = top[0]!.name;
-  if (resolved !== query) p.log.message(pc.dim(`matched profile "${resolved}"`));
+  if (resolved !== query) info(`matched profile "${pc.dim(resolved)}"`);
 
   const profile = getProfile(resolved);
   if (!profile) {
-    p.log.error(`profile "${resolved}" does not exist`);
+    error(`profile "${resolved}" does not exist`);
     process.exit(1);
   }
 
@@ -64,7 +63,7 @@ export async function launchCmd(
   try {
     launch = resolveLaunch(profile);
   } catch (err) {
-    if (err instanceof Error) p.log.error(err.message);
+    if (err instanceof Error) error(err.message);
     process.exit(1);
   }
 
@@ -85,7 +84,7 @@ export async function launchCmd(
   const modeDesc = launch.sidecar.needed
     ? `sidecar (${launch.sidecar.reason}, port: ${port})`
     : `direct (zero-hop)`;
-  p.log.info(`launching claude code (profile: ${profile.name}, ${modeDesc})`);
+  info(`launching claude code (profile: ${profile.name}, ${modeDesc})`);
   console.log(
     pc.dim(
       `endpoint: ${profile.endpoint}, model: ${profile.model}${profile.supports1m ? " [1m]" : ""}`,
@@ -111,10 +110,8 @@ export async function launchCmd(
 export async function launchDefault(args: string[]): Promise<void> {
   const def = getDefaultProfile();
   if (!def) {
-    console.error(pc.dim("(no default profile)"));
-    console.error(
-      pc.dim(`run ${pc.cyan("`cclau default <name>`")} to set one.`),
-    );
+    error("(no default profile)");
+    info(`run ${pc.cyan("`cclau default <name>`")} to set one.`);
     process.exit(1);
   }
   await launchCmd(def.name, args);

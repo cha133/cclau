@@ -1,7 +1,7 @@
 // Spawn claude + signal forwarding
 
 import { spawn, type Subprocess } from "bun";
-import * as p from "@clack/prompts";
+import { warn } from "./ui/format.js";
 import type { SettingsFile } from "./settings.js";
 
 export interface ClaudeProcess {
@@ -28,7 +28,7 @@ export function spawnClaude(settings: SettingsFile, args: string[]): ClaudeProce
       try {
         proc.kill(sig);
       } catch (err) {
-        p.log.warn(`failed to forward ${sig} to claude: ${(err as Error).message}`);
+        warn(`failed to forward ${sig} to claude: ${(err as Error).message}`);
       }
     }
   };

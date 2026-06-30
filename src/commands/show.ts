@@ -2,11 +2,10 @@
 //
 // refactored: name can only be a profile (provider concept deleted).
 
-import * as p from "@clack/prompts";
 import { getProfile, listProfileNames } from "../config.js";
 import { fuzzyTopN } from "../fuzzy.js";
 import type { Profile } from "../types.js";
-import { pc } from "../utils/logger.js";
+import { error, info, pc } from "../ui/format.js";
 import { formatModelWith1m } from "../core/model-1m.js";
 
 function maskKey(key: string): string {
@@ -19,14 +18,14 @@ export function showCmd(name: string): void {
   const hit = top[0];
   if (!hit) {
     const hint = all.length > 0 ? ` did you mean: ${all.slice(0, 3).join(", ")}?` : "";
-    p.log.error(`"${name}" does not exist.${hint} run ${pc.cyan("`cclau ls`")} to see the profile list.`);
+    error(`"${name}" does not exist.${hint} run ${pc.cyan("`cclau ls`")} to see the profile list.`);
     process.exit(1);
   }
-  if (hit.name !== name) p.log.message(pc.dim(`matched profile "${hit.name}"`));
+  if (hit.name !== name) info(`matched profile "${pc.dim(hit.name)}"`);
 
   const profile = getProfile(hit.name);
   if (!profile) {
-    p.log.error(`profile "${hit.name}" does not exist`);
+    error(`profile "${hit.name}" does not exist`);
     process.exit(1);
   }
 

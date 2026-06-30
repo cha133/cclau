@@ -4,14 +4,14 @@
 // Use `cclau show <name>` for details.
 
 import { listProfiles } from "../config.js";
-import { pc } from "../utils/logger.js";
+import { info, pc } from "../ui/format.js";
 import { padEndStr, printSection } from "../utils/table.js";
 import { formatModelWith1m } from "../core/model-1m.js";
 
 export function listCmd(): void {
   const profiles = listProfiles();
   if (profiles.length === 0) {
-    console.log(`${pc.cyan("ℹ")}  no profiles yet. run \`cclau add\` to create one.`);
+    info("no profiles yet. run `cclau add` to create one.");
     return;
   }
 

@@ -11,7 +11,6 @@
 // ============================================================================
 
 import { Command } from "commander";
-import * as p from "@clack/prompts";
 import { fuzzyTopN, isAmbiguous } from "../fuzzy.js";
 import {
   getDefaultProfile,
@@ -19,7 +18,7 @@ import {
   listProfiles,
   upsertProfile,
 } from "../config.js";
-import { pc } from "../utils/logger.js";
+import { success, error, info, pc } from "../ui/format.js";
 
 export function registerDefault(program: Command): void {
   program
@@ -42,7 +41,7 @@ function showDefault(): void {
 
   if (defaults.length > 1) {
     // Config is dirty: multiple defaults. Ask the user to clean up.
-    console.log(pc.red(`error: multiple profiles marked as default:`));
+    error(`multiple profiles marked as default:`);
     for (const prof of defaults) {
       console.log(pc.dim(`  - ${prof.name}`));
     }
@@ -54,8 +53,8 @@ function showDefault(): void {
 
   const def = getDefaultProfile();
   if (!def) {
-    console.log(pc.dim("(no default profile)"));
-    console.log(pc.dim(`run ${pc.cyan("`cclau default <name>`")} to set one.`));
+    info("(no default profile)");
+    info(`run ${pc.cyan("`cclau default <name>`")} to set one.`);
     return;
   }
 
@@ -67,19 +66,19 @@ function showDefault(): void {
 async function setDefault(name: string): Promise<void> {
   const profiles = listProfiles();
   if (profiles.length === 0) {
-    p.log.error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
+    error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
     process.exit(1);
   }
 
   const top = fuzzyTopN(name, profiles.map((p) => p.name), 2);
   if (top.length === 0) {
-    p.log.error(
+    error(
       `no profile matched "${name}". existing: ${profiles.map((p) => p.name).join(", ")}`,
     );
     process.exit(1);
   }
   if (isAmbiguous(top)) {
-    p.log.error(
+    error(
       `"${name}" ambiguously matches multiple profiles: ${top.map((s) => s.name).join(", ")}. please use a more specific name.`,
     );
     process.exit(1);
@@ -88,7 +87,7 @@ async function setDefault(name: string): Promise<void> {
 
   const target = getProfile(resolved);
   if (!target) {
-    p.log.error(`profile "${resolved}" does not exist`);
+    error(`profile "${resolved}" does not exist`);
     process.exit(1);
   }
 
@@ -103,7 +102,7 @@ async function setDefault(name: string): Promise<void> {
   }
 
   if (target.default === true) {
-    p.log.info(`"${resolved}" is already default`);
+    info(`"${resolved}" is already default`);
     return;
   }
 
@@ -113,5 +112,5 @@ async function setDefault(name: string): Promise<void> {
     updatedAt: Date.now(),
   };
   await upsertProfile(updated);
-  p.log.success(`✓ default → "${resolved}"`);
+  success(`default → "${resolved}"`);
 }
