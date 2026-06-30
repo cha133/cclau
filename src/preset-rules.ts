@@ -66,6 +66,21 @@ export const BUILTIN_PRESETS: Record<string, AnthropicRectifier> = {
 };
 
 /**
+ * Resolve a profile-level rectifier name (the string the user wrote in TOML
+ * or picked in the wizard) to the concrete AnthropicRectifier implementation.
+ *
+ * The profile schema stores an opaque name only — registry build calls this
+ * to translate. Unknown names return undefined (silent no-op); caller decides
+ * whether to log/warn.
+ */
+export function resolveRectifierByName(
+  name: string | undefined,
+): AnthropicRectifier | undefined {
+  if (!name) return undefined;
+  return BUILTIN_PRESETS[name];
+}
+
+/**
  * Wizard UI metadata for each built-in rule. Keys MUST stay aligned 1:1
  * with `BUILTIN_PRESETS` (consumed by promptAdd's rectifier picker to render
  * the p.select options). When you add a new rule to BUILTIN_PRESETS, add a

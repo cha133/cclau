@@ -12,6 +12,7 @@ import {
   RegistryBuildError,
   type RouteEntry,
 } from "../src/server/registry.js";
+import { OPENCODE_GO_PRESET } from "../src/preset-rules.js";
 import type { Profile } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
@@ -109,17 +110,12 @@ describe("buildRegistry — entry.model 字段", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildRegistry — rectifier 挂载", () => {
-  test("mode=rectify + profile.rectifier 存在 → entry.rectifier 挂上", () => {
+  test("mode=rectify + profile.rectifier=已知名字 → entry.rectifier 解析成 AnthropicRectifier", () => {
     const reg = buildRegistry(
-      makeProfile({
-        mode: "rectify",
-        rectifier: {
-          anthropic: { requestHeaders: { Authorization: "Bearer x" } },
-        },
-      }),
+      makeProfile({ mode: "rectify", rectifier: "opencode-go" }),
     );
     expect(reg.get("claude-sonnet-4-6")?.rectifier).toEqual({
-      anthropic: { requestHeaders: { Authorization: "Bearer x" } },
+      anthropic: OPENCODE_GO_PRESET,
     });
   });
 
@@ -128,14 +124,17 @@ describe("buildRegistry — rectifier 挂载", () => {
     expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
   });
 
+  test("mode=rectify + profile.rectifier=未知名字 → 静默 no-op（warn log）", () => {
+    // hand-edit TOML 写错名字时不应该崩；registry build 跳过 + warn
+    const reg = buildRegistry(
+      makeProfile({ mode: "rectify", rectifier: "nonexistent-rule" }),
+    );
+    expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
+  });
+
   test("mode=direct → 不挂 rectifier（即使 profile.rectifier 有值）", () => {
     const reg = buildRegistry(
-      makeProfile({
-        mode: "direct",
-        rectifier: {
-          anthropic: { requestHeaders: { Authorization: "Bearer x" } },
-        },
-      }),
+      makeProfile({ mode: "direct", rectifier: "opencode-go" }),
     );
     expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();
   });
@@ -145,9 +144,7 @@ describe("buildRegistry — rectifier 挂载", () => {
       makeProfile({
         mode: "openai",
         endpoint: "https://example.invalid/openai",
-        rectifier: {
-          anthropic: { requestHeaders: { Authorization: "Bearer x" } },
-        },
+        rectifier: "opencode-go",
       }),
     );
     expect(reg.get("claude-sonnet-4-6")?.rectifier).toBeUndefined();

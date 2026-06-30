@@ -30,7 +30,7 @@ import * as p from "@clack/prompts";
 import { BUILTIN_PRESETS, CUSTOM_PRESET, findPreset, type BuiltinPreset } from "../builtins.js";
 import { BUILTIN_PRESETS as PRESET_RULES, RULE_DEFS } from "../preset-rules.js";
 import { listProfileNames, listProfiles } from "../config.js";
-import type { Mode, Profile, Rectifier } from "../types.js";
+import type { Mode, Profile } from "../types.js";
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
 import { error, pc } from "./format.js";
 import { fetchUpstreamModels } from "../core/model-fetch.js";
@@ -503,9 +503,7 @@ export async function promptAdd(): Promise<Profile> {
   };
 
   if (pickedRule) {
-    profile.rectifier = {
-      anthropic: PRESET_RULES[pickedRule],
-    } as Rectifier;
+    profile.rectifier = pickedRule;
   }
 
   return profile;

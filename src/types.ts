@@ -26,10 +26,13 @@ export interface Profile {
   model: string;
   supports1m: boolean;
   /**
-   * Only effective in rectify mode. Auto-filled by builtin preset, or hand-edited TOML.
-   * Ignored in direct / openai modes.
+   * Built-in rectifier rule name (e.g. "opencode-go", "kimi"). Only effective
+   * in rectify mode; ignored otherwise. The name is resolved at sidecar boot
+   * via BUILTIN_PRESETS in src/preset-rules.ts — profile holds an opaque
+   * reference, not the rule's internals. Misses (unknown name) silently
+   * fall through to no-op; check registry warnings if a profile seems wrong.
    */
-  rectifier?: Rectifier;
+  rectifier?: string;
   createdAt: number;
   updatedAt: number;
 }

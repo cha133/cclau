@@ -104,12 +104,10 @@ model = "big-pickle"
 supports1m = false
 createdAt = 1750000000000
 updatedAt = 1750000000000
-
-[profiles.workbench.rectifier.anthropic]
-requestHeaders = { Authorization = "Bearer __CCLAU_BEARER_APIKEY__" }
+rectifier = "opencode-go"
 ```
 
-`__CCLAU_BEARER_APIKEY__` is a sentinel replaced at request time with the profile's actual API key — keep secrets out of TOML.
+`rectifier = "opencode-go"` is an opaque name reference — the profile only declares *which* built-in rule to use; the concrete hook (e.g. `Authorization: Bearer` header) lives in code (`src/preset-rules.ts`) and is resolved at sidecar boot via `resolveRectifierByName`. Unknown names fall through to no-op with a warning.
 
 ## 1M context
 

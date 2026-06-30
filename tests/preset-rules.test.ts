@@ -12,6 +12,7 @@ import {
   KIMI_PRESET,
   BUILTIN_PRESETS,
   RULE_DEFS,
+  resolveRectifierByName,
   resolvePresetHeaders,
 } from "../src/preset-rules.js";
 import type { AnthropicRequest, AnthropicRectifier } from "../src/types.js";
@@ -180,5 +181,26 @@ describe("RULE_DEFS — wizard UI metadata", () => {
       expect(def.hint).toBeString();
       expect(def.hint.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("resolveRectifierByName — profile 名 → AnthropicRectifier", () => {
+  test('"opencode-go" → OPENCODE_GO_PRESET（同一引用）', () => {
+    expect(resolveRectifierByName("opencode-go")).toBe(OPENCODE_GO_PRESET);
+  });
+
+  test('"kimi" → KIMI_PRESET（同一引用）', () => {
+    expect(resolveRectifierByName("kimi")).toBe(KIMI_PRESET);
+  });
+
+  test("未知名字 → undefined（registry build 用来 silent fallback）", () => {
+    expect(resolveRectifierByName("nonexistent")).toBeUndefined();
+  });
+
+  test("undefined / 空串 → undefined", () => {
+    expect(resolveRectifierByName(undefined)).toBeUndefined();
+    expect(resolveRectifierByName("")).toBeUndefined();
   });
 });
