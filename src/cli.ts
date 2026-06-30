@@ -89,11 +89,19 @@ registerDefault(program);
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+
+  // Strip cclau-owned flags before routing. Ownership is encoded in the flag
+  // shape itself (long --cclau-* prefix → cclau), so this never collides with
+  // claude code's --debug / -d / etc. Add future cclau-only flags here.
+  const debugIdx = argv.indexOf("--cclau-debug");
+  const debug = debugIdx >= 0;
+  if (debug) argv.splice(debugIdx, 1);
+
   const firstArg = argv[0];
 
   // rule 1: no args → launch default
   if (firstArg === undefined) {
-    await launchDefault([]);
+    await launchDefault([], debug);
     return;
   }
 
@@ -109,7 +117,7 @@ async function main(): Promise<void> {
 
   // rule 3: -X → launch default + passthrough
   if (firstArg.startsWith("-")) {
-    await launchDefault(argv);
+    await launchDefault(argv, debug);
     return;
   }
 
@@ -120,7 +128,7 @@ async function main(): Promise<void> {
   }
 
   // rule 5: fuzzy match profile + passthrough remaining args
-  await launchCmd(firstArg, argv.slice(1));
+  await launchCmd(firstArg, argv.slice(1), debug);
 }
 
 main().catch((err) => {

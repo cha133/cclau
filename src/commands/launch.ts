@@ -28,6 +28,7 @@ import { success, error, info, pc } from "../ui/format.js";
 export async function launchCmd(
   query: string,
   claudeArgs: string[],
+  debug = false,
 ): Promise<void> {
   // 1. Fuzzy-resolve profile
   const all = listProfileNames();
@@ -73,6 +74,10 @@ export async function launchCmd(
 
   if (launch.sidecar.needed) {
     port = await findFreePort(3133);
+    // Flip the parent's env so the in-process sidecar (started below) sees
+    // CCLAU_DEBUG=1 via getDebugLogger(). spawnClaude also reads `debug` and
+    // forwards to the claude child.
+    if (debug) process.env.CCLAU_DEBUG = "1";
     const registry = buildRegistry(profile);
     server = startServer(registry, port);
   }
@@ -91,7 +96,7 @@ export async function launchCmd(
     ),
   );
 
-  const { exited } = spawnClaude(settings, claudeArgs);
+  const { exited } = spawnClaude(settings, claudeArgs, debug);
   const code = await exited;
 
   // 6. Cleanup
@@ -107,12 +112,12 @@ export async function launchCmd(
  * Called by `cclau` (no args): resolve default profile → launchCmd.
  * Reports 0-default and multi-default errors here.
  */
-export async function launchDefault(args: string[]): Promise<void> {
+export async function launchDefault(args: string[], debug = false): Promise<void> {
   const def = getDefaultProfile();
   if (!def) {
     error("(no default profile)");
     info(`run ${pc.cyan("`cclau default <name>`")} to set one.`);
     process.exit(1);
   }
-  await launchCmd(def.name, args);
+  await launchCmd(def.name, args, debug);
 }

@@ -10,6 +10,7 @@ import { handleConvert, handleConvertStream } from "./openai-to-anthropic.js";
 import { info, error } from "../ui/format.js";
 import type { Registry } from "./registry.js";
 import { strip1m } from "../core/model-1m.js";
+import { getDebugLogger } from "./debug.js";
 
 export interface ServerHandle {
   server: ReturnType<typeof Bun.serve>;
@@ -68,6 +69,10 @@ async function handleMessages(req: Request, registry: Registry): Promise<Respons
   } catch (err) {
     return errorResponse(400, `invalid json: ${(err as Error).message}`);
   }
+
+  // Single IN log for all dispatch paths (rectify passthrough / openai convert /
+  // direct passthrough). Headers here are the inbound ones from claude-code.
+  getDebugLogger().logIn(req.url, Object.fromEntries(req.headers), body);
 
   // claude-code's normalizeModelStringForAPI has stripped [1m]; registry key is strip1m(model).
   // Look up by key directly — body.model is either `model[1m]` or `model`, matches after strip.

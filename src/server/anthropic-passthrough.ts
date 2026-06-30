@@ -5,6 +5,7 @@ import type { AnthropicRequest, AnthropicResponse, AnthropicStreamEvent, Rectifi
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
 import { applyRectifier, applyStreamRectifier } from "./rectify.js";
 import { resolvePresetHeaders } from "../preset-rules.js";
+import { getDebugLogger } from "./debug.js";
 
 interface UpstreamCtx {
   endpoint: string;
@@ -27,15 +28,20 @@ export async function passthroughUnary(
 
   // forward to upstream
   const presetHeaders = resolvePresetHeaders(rect.anthropic, ctx.apiKey);
-  const upstreamRes = await fetch(buildUpstreamUrl(ctx.endpoint, "anthropic"), {
+  const upstreamUrl = buildUpstreamUrl(ctx.endpoint, "anthropic");
+  const reqHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-api-key": ctx.apiKey,
+    "anthropic-version": "2023-06-01",
+    ...presetHeaders,
+  };
+  const reqBody = { ...transformed, stream: false };
+  getDebugLogger().logOut(upstreamUrl, reqHeaders, reqBody);
+
+  const upstreamRes = await fetch(upstreamUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ctx.apiKey,
-      "anthropic-version": "2023-06-01",
-      ...presetHeaders,
-    },
-    body: JSON.stringify({ ...transformed, stream: false }),
+    headers: reqHeaders,
+    body: JSON.stringify(reqBody),
   });
 
   if (!upstreamRes.ok) {
@@ -68,15 +74,20 @@ export async function* passthroughStream(
   }) as AnthropicRequest;
 
   const presetHeaders = resolvePresetHeaders(rect.anthropic, ctx.apiKey);
-  const upstreamRes = await fetch(buildUpstreamUrl(ctx.endpoint, "anthropic"), {
+  const upstreamUrl = buildUpstreamUrl(ctx.endpoint, "anthropic");
+  const reqHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-api-key": ctx.apiKey,
+    "anthropic-version": "2023-06-01",
+    ...presetHeaders,
+  };
+  const reqBody = { ...transformed, stream: true };
+  getDebugLogger().logOut(upstreamUrl, reqHeaders, reqBody);
+
+  const upstreamRes = await fetch(upstreamUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ctx.apiKey,
-      "anthropic-version": "2023-06-01",
-      ...presetHeaders,
-    },
-    body: JSON.stringify({ ...transformed, stream: true }),
+    headers: reqHeaders,
+    body: JSON.stringify(reqBody),
   });
 
   if (!upstreamRes.ok) {
@@ -117,7 +128,9 @@ export async function* passthroughStream(
           const data = JSON.parse(dataLines.join("\n")) as AnthropicStreamEvent;
           // v1: actually call streamChunkTransform (v0 missed this)
           const events = applyStreamRectifier(rect, [data]);
-          yield (events[0] ?? data) as AnthropicStreamEvent;
+          const out = (events[0] ?? data) as AnthropicStreamEvent;
+          getDebugLogger().logUpstreamChunk(out.type, out);
+          yield out;
         } catch (err) {
           // skip parse failures (keep-alive or ping)
           continue;

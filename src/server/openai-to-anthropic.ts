@@ -16,6 +16,7 @@ import type {
 import { buildUpstreamUrl } from "../utils/upstream-url.js";
 import { applyRectifier } from "./rectify.js";
 import { UpstreamError } from "./anthropic-passthrough.js";
+import { getDebugLogger } from "./debug.js";
 
 interface UpstreamCtx {
   endpoint: string;
@@ -280,6 +281,7 @@ export async function* convertOpenAIStreamToAnthropic(
   yield newSseEvent("ping", { type: "ping" });
 
   for await (const chunk of upstream) {
+    getDebugLogger().logUpstreamChunk("openai-chunk", chunk);
     const choice = chunk.choices?.[0];
     if (!choice) continue;
 
@@ -404,13 +406,18 @@ export async function* convertOpenAIStreamToAnthropic(
 export async function handleConvert(req: AnthropicRequest, ctx: UpstreamCtx): Promise<AnthropicResponse> {
   const openaiReq = anthropicToOpenAI(req, ctx.model);
 
-  const upstreamRes = await fetch(buildUpstreamUrl(ctx.endpoint, "openai"), {
+  const upstreamUrl = buildUpstreamUrl(ctx.endpoint, "openai");
+  const reqHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${ctx.apiKey}`,
+  };
+  const reqBody = { ...openaiReq, stream: false };
+  getDebugLogger().logOut(upstreamUrl, reqHeaders, reqBody);
+
+  const upstreamRes = await fetch(upstreamUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ctx.apiKey}`,
-    },
-    body: JSON.stringify({ ...openaiReq, stream: false }),
+    headers: reqHeaders,
+    body: JSON.stringify(reqBody),
   });
 
   if (!upstreamRes.ok) {
@@ -437,13 +444,18 @@ export async function* handleConvertStream(
 ): AsyncGenerator<string, void, void> {
   const openaiReq = anthropicToOpenAI(req, ctx.model);
 
-  const upstreamRes = await fetch(buildUpstreamUrl(ctx.endpoint, "openai"), {
+  const upstreamUrl = buildUpstreamUrl(ctx.endpoint, "openai");
+  const reqHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${ctx.apiKey}`,
+  };
+  const reqBody = { ...openaiReq, stream: true };
+  getDebugLogger().logOut(upstreamUrl, reqHeaders, reqBody);
+
+  const upstreamRes = await fetch(upstreamUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ctx.apiKey}`,
-    },
-    body: JSON.stringify({ ...openaiReq, stream: true }),
+    headers: reqHeaders,
+    body: JSON.stringify(reqBody),
   });
 
   if (!upstreamRes.ok) {
