@@ -89,8 +89,17 @@ async function handleMessages(req: Request, registry: Registry): Promise<Respons
 
   try {
     if (entry.mode === "openai") {
-      // openai ↔ anthropic (convert mode)
-      const ctx = { endpoint: entry.endpoint, apiKey: entry.apiKey, model: entry.model };
+      // openai ↔ anthropic (convert mode). Mount entry.rectifier (which in
+      // openai mode holds the openai-mode rule from BUILTIN_PRESETS_OPENAI,
+      // e.g. opencode-go's drop-thinking-on-effort) so vendor quirks like
+      // opencode-go's 400 on simultaneous thinking+reasoning_effort are
+      // handled.
+      const ctx = {
+        endpoint: entry.endpoint,
+        apiKey: entry.apiKey,
+        model: entry.model,
+        rect: entry.rectifier,
+      };
       if (wantStream) {
         return streamAnthropicSse(handleConvertStream(body, ctx));
       }
