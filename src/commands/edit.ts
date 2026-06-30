@@ -54,7 +54,6 @@ export async function editCmd(name: string): Promise<void> {
       }
     }
 
-    updated.updatedAt = Date.now();
     await upsertProfile(updated);
     success(`saved profile "${updated.name}"`);
   } catch (err) {

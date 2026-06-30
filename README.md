@@ -19,7 +19,7 @@ bun link          # expose `cclau` globally
 ## Quick start
 
 ```bash
-cclau add           # interactive wizard: vendor → mode → api key → model → name
+cclau add           # interactive wizard: vendor → mode → endpoint → key → model → 1m → name
 cclau default work  # mark "work" as the default profile
 cclau               # launch Claude Code with the default profile
 cclau work          # launch Claude Code with a specific profile
