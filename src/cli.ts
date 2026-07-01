@@ -74,9 +74,9 @@ program
   });
 
 program
-  .command("show <name>")
-  .description("Show profile details")
-  .action((name: string) => {
+  .command("show [name]")
+  .description("Show a profile's details (defaults to the current default profile)")
+  .action((name?: string) => {
     showCmd(name);
   });
 
