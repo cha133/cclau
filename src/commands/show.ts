@@ -113,6 +113,35 @@ function printProfile(p: Profile, isDefault: boolean): void {
 // Continuation lines align with the value column.
 const VALUE_COL = " ".repeat(13);
 
+/**
+ * Word-wrap `text` into lines of at most `maxWidth` characters (counted on
+ * the raw text — no ANSI), each prefixed with `prefix`. Words longer than
+ * `maxWidth` go on their own line (no mid-word break — readability over
+ * strict width).
+ *
+ * Used to render multi-line field values like rectifier hints so they don't
+ * leak past the terminal edge and get ugly terminal-wrap to column 0.
+ * Color is applied AFTER wrapping (each line uniformly), so callers should
+ * dim/stylize the returned lines themselves.
+ */
+function wrapText(text: string, maxWidth: number, prefix: string): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxWidth) {
+      current = `${current} ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.map((line) => `${prefix}${line}`);
+}
+
 function rectifierLines(p: Profile): string[] {
   const name = p.rectifier;
   if (!name) return [];
@@ -125,8 +154,25 @@ function rectifierLines(p: Profile): string[] {
     // emits the "unknown rectifier" warning at boot, so don't repeat it here).
     return [`  ${pc.dim("rectifier:")} ${name}`];
   }
-  return [
-    `  ${pc.dim("rectifier:")} ${def.label}`,
-    `${VALUE_COL}${pc.dim(`(${def.hint})`)}`,
-  ];
+
+  // Auto-size to terminal width. VALUE_COL = 13 chars; leave at least 40
+  // chars for content so short hints stay single-line. Falls back to 100
+  // when stdout isn't a TTY (piped to file/grep, CI logs, etc.).
+  const colWidth = process.stdout.columns ?? 100;
+  const valueWidth = Math.max(40, colWidth - VALUE_COL.length);
+
+  const out: string[] = [];
+  // Label: first line rides next to "rectifier:", continuation (if any)
+  // aligns to VALUE_COL. Not dimmed (matches single-line style).
+  const labelLines = wrapText(def.label, valueWidth, "");
+  out.push(`  ${pc.dim("rectifier:")} ${labelLines[0]}`);
+  for (let i = 1; i < labelLines.length; i++) {
+    out.push(`${VALUE_COL}${labelLines[i]}`);
+  }
+  // Hint: every line dimmed, all aligned to VALUE_COL.
+  const hintLines = wrapText(`(${def.hint})`, valueWidth, "");
+  for (const line of hintLines) {
+    out.push(`${VALUE_COL}${pc.dim(line)}`);
+  }
+  return out;
 }
