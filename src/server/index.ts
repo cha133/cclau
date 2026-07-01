@@ -22,8 +22,15 @@ export interface ServerHandle {
  * Start the cclau sidecar server
  * @param registry model id → RouteEntry routing table (from buildRegistry)
  * @param port listening port (obtained via findFreePort)
+ * @param debug when true, emit a `cclau server up: ...` status line. Off by
+ *   default so launch is silent unless --cclau-debug is passed. The HTTP-traffic
+ *   debug log (src/server/debug.ts) is gated separately by CCLAU_DEBUG.
  */
-export function startServer(registry: Registry, port: number): ServerHandle {
+export function startServer(
+  registry: Registry,
+  port: number,
+  debug = false,
+): ServerHandle {
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -46,14 +53,15 @@ export function startServer(registry: Registry, port: number): ServerHandle {
     },
   });
 
-  const routeHint =
-    registry.size === 1
-      ? `upstream=${[...registry.values()][0]!.endpoint}`
-      : `upstream=${registry.size} endpoints`;
-
-  info(
-    `cclau server up: http://127.0.0.1:${server.port} (registry: ${registry.size} routes, ${routeHint})`,
-  );
+  if (debug) {
+    const routeHint =
+      registry.size === 1
+        ? `upstream=${[...registry.values()][0]!.endpoint}`
+        : `upstream=${registry.size} endpoints`;
+    info(
+      `cclau server up: http://127.0.0.1:${server.port} (registry: ${registry.size} routes, ${routeHint})`,
+    );
+  }
 
   return {
     server,

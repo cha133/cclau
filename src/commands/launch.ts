@@ -23,7 +23,7 @@ import { resolveLaunch, writeSettingsFile } from "../settings.js";
 import { spawnClaude } from "../process.js";
 import { startServer } from "../server/index.js";
 import { buildRegistry } from "../server/registry.js";
-import { success, error, info, pc } from "../ui/format.js";
+import { error, info, pc } from "../ui/format.js";
 
 export async function launchCmd(
   query: string,
@@ -79,30 +79,32 @@ export async function launchCmd(
     // forwards to the claude child.
     if (debug) process.env.CCLAU_DEBUG = "1";
     const registry = buildRegistry(profile);
-    server = startServer(registry, port);
+    server = startServer(registry, port, debug);
   }
 
   // 4. Write settings
   const settings = await writeSettingsFile(profile, port);
 
-  // 5. Log
-  const modeDesc = launch.sidecar.needed
-    ? `sidecar (${launch.sidecar.reason}, port: ${port})`
-    : `direct (zero-hop)`;
-  info(`launching claude code (profile: ${profile.name}, ${modeDesc})`);
-  console.log(
-    pc.dim(
-      `endpoint: ${profile.endpoint}, model: ${profile.model}${profile.supports1m ? " [1m]" : ""}`,
-    ),
-  );
+  // 5. Log (gated: launch is silent by default; --cclau-debug surfaces these)
+  if (debug) {
+    const modeDesc = launch.sidecar.needed
+      ? `sidecar (${launch.sidecar.reason}, port: ${port})`
+      : `direct (zero-hop)`;
+    info(`launching claude code (profile: ${profile.name}, ${modeDesc})`);
+    console.log(
+      pc.dim(
+        `endpoint: ${profile.endpoint}, model: ${profile.model}${profile.supports1m ? " [1m]" : ""}`,
+      ),
+    );
+  }
 
   const { exited } = spawnClaude(settings, claudeArgs, debug);
   const code = await exited;
 
-  // 6. Cleanup
+  // 6. Cleanup (same gate as step 5: status only shows under --cclau-debug)
   if (server) {
     server.stop();
-    console.log(`sidecar server stopped (port ${port})`);
+    if (debug) console.log(`sidecar server stopped (port ${port})`);
   }
 
   process.exit(code ?? 0);
