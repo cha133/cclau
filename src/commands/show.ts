@@ -21,6 +21,37 @@ function maskKey(key: string): string {
   return pc.dim(`${key.slice(0, 7)}...${key.slice(-4)}`);
 }
 
+/**
+ * Format a unix-ms timestamp in the user's local timezone as
+ * `YYYY-MM-DD HH:MM:SS ±HH:MM` (e.g. `2026-06-30 16:56:22 +08:00`).
+ *
+ * Why not `.toISOString()`: that always emits UTC (`Z` suffix), which
+ * forces the reader to do mental offset math. Why not `.toLocaleString()`:
+ * the output shape varies across Node ICU versions and system locale —
+ * a user in zh-CN sees different separator / AM-PM choices than one in
+ * en-US. The manual format is deterministic, sortable, and unambiguous
+ * about the offset so the reader never has to guess what TZ they're
+ * looking at.
+ */
+function formatLocalTs(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  const ss = pad(d.getSeconds());
+  // Date#getTimezoneOffset returns minutes WEST of UTC, so negate to get
+  // the conventional east-of-UTC offset used in `±HH:MM` formatting.
+  const offMin = -d.getTimezoneOffset();
+  const sign = offMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offMin);
+  const oh = pad(Math.floor(abs / 60));
+  const om = pad(abs % 60);
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} ${sign}${oh}:${om}`;
+}
+
 export function showCmd(name?: string): void {
   let resolvedName: string;
 
@@ -74,8 +105,8 @@ function printProfile(p: Profile, isDefault: boolean): void {
     `  ${pc.dim("model   :")} ${formatModelWith1m(p.model, p.supports1m, pc.dim)}`,
   );
   console.log(`  ${pc.dim("default :")} ${isDefault ? pc.green("true") : "false"}`);
-  console.log(`  ${pc.dim("createdAt:")} ${new Date(p.createdAt).toISOString()}`);
-  console.log(`  ${pc.dim("updatedAt:")} ${new Date(p.updatedAt).toISOString()}`);
+  console.log(`  ${pc.dim("createdAt:")} ${formatLocalTs(p.createdAt)}`);
+  console.log(`  ${pc.dim("updatedAt:")} ${formatLocalTs(p.updatedAt)}`);
 }
 
 // Value column starts at column 13 (2-space indent + 9-char "createdAt:" + 1 space).
