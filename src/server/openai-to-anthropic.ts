@@ -319,9 +319,13 @@ export async function* convertOpenAIStreamToAnthropic(
 
   // Serialize an SSE event + auto-record it as a downstream log entry so
   // upstream-aggregation length vs downstream-cumulative can be diffed to
-  // prove no characters were eaten.
+  // prove no characters were eaten. Pass state.messageId so the logger
+  // can scope its per-block aggregator to this request — two concurrent
+  // openai-mode requests share the same DebugLogger instance, so without
+  // the messageId key their content_block_delta events with the same
+  // block index would clobber each other in the log.
   const yieldSse = (event: string, data: unknown): string => {
-    log.logDownstream(event, data);
+    log.logDownstream(state.messageId, event, data);
     return newSseEvent(event, data);
   };
 

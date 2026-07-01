@@ -45,8 +45,14 @@ export interface DebugLogger {
   /** Downstream SSE event actually forwarded to claude-code. text_delta events
    *  are auto-suffixed with `(cumulative N chars)` so a missing-character
    *  investigation can compare upstream aggregate length vs downstream
-   *  cumulative without instrumenting the call sites. */
-  logDownstream(event: string, data: unknown): void;
+   *  cumulative without instrumenting the call sites.
+   *
+   *  `messageId` MUST be the per-request message id (from message_start's
+   *  `message.id`). The logger keys per-block aggregation by this id, so
+   *  two concurrent requests with the same block index never collide on
+   *  the shared aggregator state. `_cumulative_text_chars` is scoped to
+   *  the message id — chat-A's text delta does not bump chat-B's count. */
+  logDownstream(messageId: string, event: string, data: unknown): void;
 
   /** Aggregated upstream openai chat.completion.chunk text delta. Caller
    *  accumulates consecutive `delta.content` chunks with the same chatcmpl-id
@@ -176,19 +182,19 @@ function buildLogger(): DebugLogger {
   ensureAppStateDir();
   const logPath = sessionLogPath();
 
-  // Session-scoped cumulative length of forwarded text_delta characters.
-  // Updated on every text_delta event so logDownstream can stamp
-  // `(_cumulative_text_chars N)` without the call site having to thread
-  // state. Kept private to this closure; only accessible via the returned
-  // logger.
-  let downstreamTextChars = 0;
-
-  // Per-block aggregation for downstream content_block_delta events.
-  // Without this, every Chinese char streamed as its own content_block_delta
+  // Per-block aggregation for downstream content_block_delta events,
+  // keyed by `${messageId}#${blockIndex}` so two concurrent requests with
+  // the same block index never collide on a shared aggregator. Without
+  // this key split, every Chinese char streamed as its own content_block_delta
   // writes ~120 chars/line — 1700 chunks ≈ 200KB. Aggregation collapses the
   // run to a single summary line per block at content_block_stop, keeping
   // enough data (total_chars + 200-char preview + cumulative) to spot
   // missing-character bugs.
+  //
+  // Also: the OLD design kept a single `blockAgg` and `downstreamTextChars`
+  // in this closure, which made the debug log look like cclau ate characters
+  // whenever two requests overlapped (chat-A's preview grew by chat-B's first
+  // 15 chars; chat-A's total_chars inflated). The key split fixes that.
   type BlockAgg = {
     index: number;
     type: string;
@@ -197,25 +203,32 @@ function buildLogger(): DebugLogger {
     totalChars: number;
     preview: string;
   };
-  let blockAgg: BlockAgg | null = null;
+  const blockAggs = new Map<string, BlockAgg>();
+  // Per-message text-chars counter, scoped by messageId. Used to stamp
+  // `_cumulative_text_chars` in the block summary without leaking across
+  // concurrent requests.
+  const textCharsByMessage = new Map<string, number>();
+  const blockKey = (msgId: string, idx: number): string => `${msgId}#${idx}`;
 
-  const flushBlockAgg = (reason: string) => {
-    if (!blockAgg) return;
+  const flushBlockAgg = (key: string, messageId: string, reason: string) => {
+    const agg = blockAggs.get(key);
+    if (!agg) return;
     const summary = {
-      index: blockAgg.index,
-      type: blockAgg.type,
-      delta_count: blockAgg.deltaCount,
-      delta_type: blockAgg.deltaType,
-      total_chars: blockAgg.totalChars,
-      preview: blockAgg.preview,
-      _cumulative_text_chars: blockAgg.type === "text" ? downstreamTextChars : undefined,
+      index: agg.index,
+      type: agg.type,
+      delta_count: agg.deltaCount,
+      delta_type: agg.deltaType,
+      total_chars: agg.totalChars,
+      preview: agg.preview,
+      _cumulative_text_chars:
+        agg.type === "text" ? (textCharsByMessage.get(messageId) ?? 0) : undefined,
       _flush_reason: reason,
     };
     writeLines(logPath, [
       `--- DOWNSTREAM content_block_summary ---`,
       JSON.stringify(summary),
     ]);
-    blockAgg = null;
+    blockAggs.delete(key);
   };
 
   return {
@@ -244,7 +257,7 @@ function buildLogger(): DebugLogger {
     logUpstreamChunk(event, data) {
       writeLines(logPath, [`--- UPSTREAM ${event} ---`, JSON.stringify(data)]);
     },
-    logDownstream(event, data) {
+    logDownstream(messageId, event, data) {
       // content_block_delta: silently aggregate into the open block's
       // summary; flush happens at content_block_stop or message_stop.
       if (event === "content_block_delta") {
@@ -263,15 +276,23 @@ function buildLogger(): DebugLogger {
                 ? d?.delta?.partial_json
                 : undefined;
         if (idx !== undefined && dt !== undefined && typeof txt === "string") {
-          // defensive: if a delta arrives for a different block than the one
-          // we have open, flush the old one as "interrupted" and start fresh.
-          // Well-formed streams shouldn't do this, but Anthropic spec is
-          // loose enough we'd rather log than silently corrupt.
-          if (blockAgg && blockAgg.index !== idx) {
-            flushBlockAgg("interrupted");
-          }
-          if (!blockAgg || blockAgg.index !== idx) {
-            blockAgg = {
+          const key = blockKey(messageId, idx);
+          let agg = blockAggs.get(key);
+          if (!agg) {
+            // New (messageId, idx) slot. Defensive: in a well-formed stream
+            // the prior block for this message would have been stopped before
+            // a new one started streaming deltas. If we find another open
+            // block for the same message, the stream is malformed (or our
+            // aggregator missed a stop) — flush the orphan as "interrupted"
+            // so the next content_block_stop on it doesn't claim a phantom
+            // block.
+            const prefix = `${messageId}#`;
+            for (const otherKey of [...blockAggs.keys()]) {
+              if (otherKey.startsWith(prefix) && otherKey !== key) {
+                flushBlockAgg(otherKey, messageId, "interrupted");
+              }
+            }
+            agg = {
               index: idx,
               type:
                 dt === "text_delta"
@@ -284,25 +305,32 @@ function buildLogger(): DebugLogger {
               totalChars: 0,
               preview: "",
             };
+            blockAggs.set(key, agg);
           }
-          blockAgg.deltaCount++;
-          blockAgg.deltaType = dt;
-          blockAgg.totalChars += txt.length;
-          if (blockAgg.preview.length < 200) {
-            blockAgg.preview = (blockAgg.preview + txt).slice(0, 200);
+          agg.deltaCount++;
+          agg.deltaType = dt;
+          agg.totalChars += txt.length;
+          if (agg.preview.length < 200) {
+            agg.preview = (agg.preview + txt).slice(0, 200);
           }
-          if (dt === "text_delta") downstreamTextChars += txt.length;
+          if (dt === "text_delta") {
+            textCharsByMessage.set(
+              messageId,
+              (textCharsByMessage.get(messageId) ?? 0) + txt.length,
+            );
+          }
           return;
         }
       }
       // content_block_stop: flush the matching block's summary.
       if (event === "content_block_stop") {
         const d = data as { index?: number };
-        if (blockAgg && d?.index === blockAgg.index) {
-          flushBlockAgg("normal");
-          return;
-        }
         if (d?.index !== undefined) {
+          const key = blockKey(messageId, d.index);
+          if (blockAggs.has(key)) {
+            flushBlockAgg(key, messageId, "normal");
+            return;
+          }
           writeLines(logPath, [
             `--- DOWNSTREAM content_block_summary ---`,
             JSON.stringify({ index: d.index, _flush_reason: "stop-without-deltas" }),
@@ -310,9 +338,19 @@ function buildLogger(): DebugLogger {
           return;
         }
       }
-      // message_stop: hard flush in case the last block never stopped.
+      // message_stop: hard flush any block for this message that never
+      // stopped (defensive). Per-message scope — only blocks under this
+      // messageId are flushed, not all open blocks.
       if (event === "message_stop") {
-        flushBlockAgg("message-stop-without-block-stop");
+        const prefix = `${messageId}#`;
+        const keysToFlush: string[] = [];
+        for (const key of blockAggs.keys()) {
+          if (key.startsWith(prefix)) keysToFlush.push(key);
+        }
+        for (const key of keysToFlush) {
+          flushBlockAgg(key, messageId, "message-stop-without-block-stop");
+        }
+        textCharsByMessage.delete(messageId);
       }
       // Default: log the event individually (message_start / ping /
       // content_block_start / message_delta / message_stop / WARN).
@@ -367,7 +405,7 @@ const NULL_LOGGER: DebugLogger = {
   logIn: () => {},
   logOut: () => {},
   logUpstreamChunk: () => {},
-  logDownstream: () => {},
+  logDownstream: (_messageId: string, _event: string, _data: unknown) => {},
   logUpstreamOpenaiText: () => {},
   logUpstreamOpenaiReasoning: () => {},
   logUpstreamOpenaiToolDelta: () => {},

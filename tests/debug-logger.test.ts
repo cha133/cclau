@@ -132,9 +132,9 @@ describe("DebugLogger — IN log content", () => {
 describe("DebugLogger — logDownstream (sparse events)", () => {
   test("message_start / ping / message_stop each logged individually", () => {
     const log = getDebugLogger();
-    log.logDownstream("message_start", { type: "message_start", message: { id: "msg_1" } });
-    log.logDownstream("ping", { type: "ping" });
-    log.logDownstream("message_stop", { type: "message_stop" });
+    log.logDownstream("msg_1", "message_start", { type: "message_start", message: { id: "msg_1" } });
+    log.logDownstream("msg_1", "ping", { type: "ping" });
+    log.logDownstream("msg_1", "message_stop", { type: "message_stop" });
     const text = readAllLogs();
     expect(text).toContain("--- DOWNSTREAM message_start ---");
     expect(text).toContain("--- DOWNSTREAM ping ---");
@@ -143,7 +143,7 @@ describe("DebugLogger — logDownstream (sparse events)", () => {
 
   test("content_block_start logged individually (one line per block)", () => {
     const log = getDebugLogger();
-    log.logDownstream("content_block_start", {
+    log.logDownstream("msg_test", "content_block_start", {
       type: "content_block_start",
       index: 0,
       content_block: { type: "text", text: "" },
@@ -157,20 +157,20 @@ describe("DebugLogger — logDownstream (sparse events)", () => {
 describe("DebugLogger — logDownstream (content_block_delta aggregation)", () => {
   test("consecutive text_delta for same index → ONE summary at stop", () => {
     const log = getDebugLogger();
-    log.logDownstream("content_block_start", {
+    log.logDownstream("msg_test", "content_block_start", {
       type: "content_block_start",
       index: 0,
       content_block: { type: "text", text: "" },
     });
     // 5 single-char Chinese text deltas (mimics GLM char-by-char streaming)
     for (const ch of ["中", "国", "茶", "茶", "！"]) {
-      log.logDownstream("content_block_delta", {
+      log.logDownstream("msg_test", "content_block_delta", {
         type: "content_block_delta",
         index: 0,
         delta: { type: "text_delta", text: ch },
       });
     }
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 0 });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 0 });
     const text = readAllLogs();
     // Individual deltas must NOT appear as their own DOWNSTREAM content_block_delta
     // lines — only the summary should.
@@ -185,16 +185,16 @@ describe("DebugLogger — logDownstream (content_block_delta aggregation)", () =
     expect(text).toContain('"_flush_reason":"normal"');
   });
 
-  test("cumulative_text_chars is session-wide across multiple text blocks", () => {
+  test("cumulative_text_chars is per-message across multiple text blocks in the same message", () => {
     const log = getDebugLogger();
     // Block 0: 3 chars
-    log.logDownstream("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
-    log.logDownstream("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "abc" } });
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 0 });
+    log.logDownstream("msg_test", "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+    log.logDownstream("msg_test", "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "abc" } });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 0 });
     // Block 1: 2 more chars
-    log.logDownstream("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } });
-    log.logDownstream("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "de" } });
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 1 });
+    log.logDownstream("msg_test", "content_block_start", { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } });
+    log.logDownstream("msg_test", "content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "de" } });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 1 });
     const text = readAllLogs();
     // First block's summary should show _cumulative_text_chars:3, second should show 5.
     expect(text).toMatch(/"_cumulative_text_chars":3[^5]/); // 3 not followed by 5 (i.e. 3, not 35)
@@ -204,17 +204,17 @@ describe("DebugLogger — logDownstream (content_block_delta aggregation)", () =
   test("thinking_delta aggregated with thinking block summary (no text cumulative)", () => {
     const log = getDebugLogger();
     const sentinel = `${SENTINEL_PREFIX}-thinking`;
-    log.logDownstream("content_block_start", {
+    log.logDownstream("msg_test", "content_block_start", {
       type: "content_block_start",
       index: 0,
       content_block: { type: "thinking", thinking: sentinel },
     });
-    log.logDownstream("content_block_delta", {
+    log.logDownstream("msg_test", "content_block_delta", {
       type: "content_block_delta",
       index: 0,
       delta: { type: "thinking_delta", thinking: sentinel + " user asked about news" },
     });
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 0 });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 0 });
     const text = readAllLogs();
     // Anchor on the sentinel so we check THIS test's summary, not whatever
     // earlier text-block tests wrote to the same global log file.
@@ -234,22 +234,22 @@ describe("DebugLogger — logDownstream (content_block_delta aggregation)", () =
 
   test("input_json_delta aggregated for tool_use block", () => {
     const log = getDebugLogger();
-    log.logDownstream("content_block_start", {
+    log.logDownstream("msg_test", "content_block_start", {
       type: "content_block_start",
       index: 0,
       content_block: { type: "tool_use", id: "tool_1", name: "Bash", input: {} },
     });
-    log.logDownstream("content_block_delta", {
+    log.logDownstream("msg_test", "content_block_delta", {
       type: "content_block_delta",
       index: 0,
       delta: { type: "input_json_delta", partial_json: '{"command":' },
     });
-    log.logDownstream("content_block_delta", {
+    log.logDownstream("msg_test", "content_block_delta", {
       type: "content_block_delta",
       index: 0,
       delta: { type: "input_json_delta", partial_json: '"ls"}' },
     });
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 0 });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 0 });
     const text = readAllLogs();
     expect(text).toContain('"type":"tool_use"');
     expect(text).toContain('"delta_count":2');
@@ -260,11 +260,11 @@ describe("DebugLogger — logDownstream (content_block_delta aggregation)", () =
 
   test("interrupted block (delta for new index without prior stop) flushes old + starts new", () => {
     const log = getDebugLogger();
-    log.logDownstream("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
-    log.logDownstream("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ab" } });
+    log.logDownstream("msg_test", "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+    log.logDownstream("msg_test", "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ab" } });
     // jump to index 1 without stopping 0 — defensive flush
-    log.logDownstream("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "cd" } });
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 1 });
+    log.logDownstream("msg_test", "content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "cd" } });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 1 });
     const text = readAllLogs();
     // Two summaries: first marked "interrupted", second "normal"
     expect(text).toMatch(/"_flush_reason":"interrupted"[\s\S]*?"_flush_reason":"normal"|"_flush_reason":"normal"[\s\S]*?"_flush_reason":"interrupted"/);
@@ -275,7 +275,7 @@ describe("DebugLogger — logDownstream (content_block_delta aggregation)", () =
 
   test("content_block_stop without prior deltas → 'stop-without-deltas' reason", () => {
     const log = getDebugLogger();
-    log.logDownstream("content_block_stop", { type: "content_block_stop", index: 7 });
+    log.logDownstream("msg_test", "content_block_stop", { type: "content_block_stop", index: 7 });
     const text = readAllLogs();
     expect(text).toContain('"index":7');
     expect(text).toContain('"_flush_reason":"stop-without-deltas"');
@@ -283,12 +283,177 @@ describe("DebugLogger — logDownstream (content_block_delta aggregation)", () =
 
   test("unterminated block at message_stop → 'message-stop-without-block-stop' flush", () => {
     const log = getDebugLogger();
-    log.logDownstream("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
-    log.logDownstream("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "lost" } });
-    log.logDownstream("message_stop", { type: "message_stop" });
+    log.logDownstream("msg_test", "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+    log.logDownstream("msg_test", "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "lost" } });
+    log.logDownstream("msg_test", "message_stop", { type: "message_stop" });
     const text = readAllLogs();
     expect(text).toContain('"preview":"lost"');
     expect(text).toContain('"_flush_reason":"message-stop-without-block-stop"');
+  });
+});
+
+// ============================================================================
+// Concurrent-request isolation — regression for the blockAgg/shared-counter bug.
+//
+// Before per-message keying, two requests with the same block index both wrote
+// to the same `blockAgg` and `downstreamTextChars`. chat-A's preview grew by
+// chat-B's first N chars; chat-A's total_chars was inflated; chat-A's
+// _cumulative_text_chars leaked chat-B's text into its counter. This suite
+// pins the post-fix invariant: a request's block summary is computed only
+// from its own deltas.
+// ============================================================================
+
+describe("DebugLogger — logDownstream (concurrent request isolation)", () => {
+  test("two requests with same block index do not pollute each other's summary", () => {
+    const log = getDebugLogger();
+    // Request A: msg_a, 4 chars of text on block 0
+    log.logDownstream("msg_a", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    log.logDownstream("msg_a", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "你" },
+    });
+    log.logDownstream("msg_a", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "好" },
+    });
+    // Request B: msg_b, 2 chars of text on block 0
+    log.logDownstream("msg_b", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    log.logDownstream("msg_b", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "测" },
+    });
+    // Back to A — 2 more chars
+    log.logDownstream("msg_a", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "世" },
+    });
+    log.logDownstream("msg_a", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "界" },
+    });
+    log.logDownstream("msg_a", "content_block_stop", { type: "content_block_stop", index: 0 });
+    // Back to B — 1 more char
+    log.logDownstream("msg_b", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "试" },
+    });
+    log.logDownstream("msg_b", "content_block_stop", { type: "content_block_stop", index: 0 });
+
+    const text = readAllLogs();
+    // Each request's summary line is anchored by its own unique preview text,
+    // so we can grep them independently without regex contortions.
+    const summaryA = text.split("\n").find((l) => l.includes('"preview":"你好世界"'));
+    const summaryB = text.split("\n").find((l) => l.includes('"preview":"测试"'));
+    expect(summaryA).toBeDefined();
+    expect(summaryB).toBeDefined();
+    // A: 4 chars total, cumulative 4 (only A's chars)
+    expect(summaryA!).toContain('"delta_count":4');
+    expect(summaryA!).toContain('"total_chars":4');
+    expect(summaryA!).toContain('"_cumulative_text_chars":4');
+    // B: 2 chars total, cumulative 2 (only B's chars — must NOT see A's 4)
+    expect(summaryB!).toContain('"delta_count":2');
+    expect(summaryB!).toContain('"total_chars":2');
+    expect(summaryB!).toContain('"_cumulative_text_chars":2');
+  });
+
+  test("message_stop only flushes that message's unterminated blocks, not others", () => {
+    const log = getDebugLogger();
+    // msg_x leaves a block open (no content_block_stop)
+    log.logDownstream("msg_x", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    log.logDownstream("msg_x", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "orphan" },
+    });
+    // msg_y also leaves a block open — must NOT be flushed by msg_x's message_stop
+    log.logDownstream("msg_y", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    log.logDownstream("msg_y", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "still-open" },
+    });
+    // Only msg_x stops
+    log.logDownstream("msg_x", "message_stop", { type: "message_stop" });
+
+    const text = readAllLogs();
+    // msg_x's orphan got flushed with the message-stop-without-block-stop reason
+    expect(text).toContain('"preview":"orphan"');
+    expect(text).toContain('"_flush_reason":"message-stop-without-block-stop"');
+    // msg_y's block is still open in the aggregator — subsequent delta should
+    // append to its existing accumulator, not start fresh.
+    log.logDownstream("msg_y", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "-continued" },
+    });
+    log.logDownstream("msg_y", "content_block_stop", { type: "content_block_stop", index: 0 });
+    const text2 = readAllLogs();
+    // msg_y's final summary should show BOTH chunks concatenated (10 + 10 = 20 chars)
+    const summaryY = text2.split("\n").find((l) => l.includes('"preview":"still-open-continued"'));
+    expect(summaryY).toBeDefined();
+    expect(summaryY!).toContain('"total_chars":20');
+    expect(summaryY!).toContain('"delta_count":2');
+  });
+
+  test("different messages with the same block index get independent _cumulative_text_chars", () => {
+    const log = getDebugLogger();
+    // msg_p: 5 chars
+    log.logDownstream("msg_p", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    log.logDownstream("msg_p", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "12345" },
+    });
+    log.logDownstream("msg_p", "content_block_stop", { type: "content_block_stop", index: 0 });
+    // msg_q: 3 chars (different message, same index)
+    log.logDownstream("msg_q", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    log.logDownstream("msg_q", "content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "abc" },
+    });
+    log.logDownstream("msg_q", "content_block_stop", { type: "content_block_stop", index: 0 });
+
+    const text = readAllLogs();
+    const summaryP = text.split("\n").find((l) => l.includes('"preview":"12345"'));
+    const summaryQ = text.split("\n").find((l) => l.includes('"preview":"abc"'));
+    expect(summaryP).toBeDefined();
+    expect(summaryQ).toBeDefined();
+    // Each message has its own counter — must NOT see the other's 5 or 3.
+    expect(summaryP!).toContain('"_cumulative_text_chars":5');
+    expect(summaryP!).not.toContain('"_cumulative_text_chars":8');
+    expect(summaryQ!).toContain('"_cumulative_text_chars":3');
+    expect(summaryQ!).not.toContain('"_cumulative_text_chars":8');
   });
 });
 
@@ -400,8 +565,8 @@ describe("DebugLogger — NULL_LOGGER when CCLAU_DEBUG unset", () => {
     const log = getDebugLogger();
     // none of these should throw and none should write
     log.logIn("u", {}, { model: "x" });
-    log.logDownstream("message_start", { type: "message_start" });
-    log.logDownstream("content_block_delta", {
+    log.logDownstream("msg_null", "message_start", { type: "message_start" });
+    log.logDownstream("msg_null", "content_block_delta", {
       type: "content_block_delta",
       index: 0,
       delta: { type: "text_delta", text: "should not appear" },
