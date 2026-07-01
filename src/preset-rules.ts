@@ -100,20 +100,25 @@ export function resolveRectifierByName(
 //      all routed through opencode-go, not glm-specific.)
 
 /**
- * opencode-go (openai mode): drop `thinking` when `reasoning_effort` is set,
- * and drop graded `reasoning_effort` so Fireworks GLM-5.2 surfaces reasoning.
+ * opencode-go (openai mode): drop both `thinking` and `reasoning_effort` so
+ * Fireworks GLM-5.2 auto-enables its default (Max) reasoning tier.
  *
  * Pain point 1 (400 avoidance): opencode-go's chat-completions endpoint
  * rejects requests with both `thinking` and `reasoning_effort` set (HTTP
- * 400 "cannot specify both"). Drop `thinking` so the request is accepted.
+ * 400 "cannot specify both"). Drop `thinking` when `reasoning_effort` is
+ * also present so the request is accepted.
  *
- * Pain point 2 (surface reasoning): Fireworks' GLM-5.2 implementation
- * accepts graded `reasoning_effort` values (low/medium/high/xhigh/max) but
- * DOES NOT surface `reasoning_content` to the response — reasoning lands
- * only in trace. Only `default` (omitted) and `none` (explicit disable)
- * surface correctly. Since the user set effort because they want thinking,
- * dropping the graded value lets Fireworks fall back to default (Max tier),
- * which is what the user actually wanted.
+ * Pain point 2 (tier model — the deeper reason to drop both): Fireworks
+ * GLM only auto-enables the default (Max) reasoning tier when NEITHER
+ * `thinking` nor `reasoning_effort` is present. Setting either field —
+ * graded value (low/medium/high/xhigh/max), shorthand (`adaptive`), or
+ * any other value — locks GLM into `adaptive` thinking, a lower tier
+ * than what users typically want when they typed `/effort high`.
+ *
+ * Dropping the graded `reasoning_effort` lets Fireworks fall back to
+ * default Max, which is what the user actually wanted. (Side note: the
+ * Max tier is also the only path that surfaces `reasoning_content` to
+ * the response — graded tiers land reasoning in trace only.)
  *
  * Net behavior with this preset enabled:
  *   - claude-code `/effort high` → cclau drops effort → Fireworks default
@@ -171,8 +176,12 @@ export const BUILTIN_PRESETS_OPENAI: Record<
  */
 export const RULE_DEFS_OPENAI: Record<string, { label: string; hint: string }> = {
   "opencode-go": {
-    label: "opencode-go — drop thinking on effort",
-    hint: "drop `thinking` when `reasoning_effort` is set (avoids upstream 400)",
+    label: "opencode-go — strip effort for max reasoning",
+    hint:
+      "drop both `thinking` and `reasoning_effort`: Fireworks GLM only " +
+      "auto-enables max reasoning when neither field is set — any value " +
+      "(graded or otherwise) locks it to adaptive. Also avoids 400 from " +
+      "passing both.",
   },
 };
 
