@@ -77,7 +77,7 @@ describe("anthropicToOpenAI — system 字段", () => {
   test("system 数组含非 text 块 → 跳过非 text", () => {
     const sysBlocks: AnthropicContentBlock[] = [
       { type: "text", text: "real text" },
-      { type: "image", source: { type: "base64", media_type: "image/png", data: "x" } } as never,
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "x" } },
     ];
     const req = makeAnthropicReq({ system: sysBlocks });
     const out = anthropicToOpenAI(req, "m");

@@ -4,13 +4,19 @@
 // - builtins.ts is the "endpoint + mode + label" preset for the add wizard
 // - preset-rules.ts is the "rectifier rules" paired with builtin presets (optional, asked during add)
 //
-// v1 ships 2 rules (solving 2 concrete pain points):
+// v1 ships 3 rules (solving 3 concrete pain points):
 // 1. opencode-go 401: dual auth header (x-api-key + Authorization: Bearer)
 // 2. kimi thinking 400: normalize thinking.type value domain
+// 3. strip-images: drop image content blocks for vision-incapable upstreams/models
 //
 // Add a new rule: export a preset constant here + add it to BUILTIN_PRESETS.
 
-import type { AnthropicRectifier, AnthropicRequest, OpenAIRequest } from "./types.js";
+import type {
+  AnthropicContentBlock,
+  AnthropicRectifier,
+  AnthropicRequest,
+  OpenAIRequest,
+} from "./types.js";
 
 /**
  * Sentinel for requestHeaders values: when a header value equals this string,
@@ -59,10 +65,109 @@ export const KIMI_PRESET: AnthropicRectifier = {
   },
 };
 
+/**
+ * strip-images preset: drop `image` content blocks before forwarding upstream
+ *
+ * Pain point: claude-code sends `image` content blocks whenever the user
+ * attaches an image (e.g. drag-drop, paste, screenshot tool). Upstreams /
+ * models that do not support vision reject these with 4xx, surfacing to the
+ * user as "There's an issue with the selected model ..." in claude-code.
+ * This preset strips `image` blocks from the request so the upstream sees
+ * only the text it can handle.
+ *
+ * Not bound to a fixed provider — works for any vision-incapable
+ * upstream/model the user picks (e.g. mimo-v2.5-pro, GLM text-only tiers,
+ * custom self-hosted models).
+ *
+ * Strip scope:
+ *   - `messages[*].content` (when array form)
+ *   - recursive into `messages[*].content[*].tool_result.content` (when array)
+ *     — tool return values can carry images (screenshot tools, vision tools)
+ *   - `system` (when array form)
+ *
+ * If stripping empties a message's content array entirely, replace with a
+ * single placeholder text block so the turn keeps its place in the
+ * conversation. If stripping empties `system`, drop the field entirely.
+ *
+ * Pure / immutable: returns the same `req` reference when nothing changed.
+ */
+const STRIP_IMAGES_PLACEHOLDER = "[image stripped by cclau — model does not support vision]";
+
+/** Strip image blocks from a content array. Recurses into tool_result.content
+ *  (when array) so screenshot tools / vision tools' outputs are also sanitized.
+ *  Returns the SAME array reference if nothing changed (lets callers detect
+ *  "no work" via ===). Otherwise returns a new array; original input is
+ *  not mutated. */
+function stripImagesFromBlocks(
+  blocks: readonly AnthropicContentBlock[],
+): AnthropicContentBlock[] {
+  const out: AnthropicContentBlock[] = [];
+  let changed = false;
+  for (const block of blocks) {
+    if (block.type === "image") {
+      changed = true;
+      continue;
+    }
+    if (block.type === "tool_result" && Array.isArray(block.content)) {
+      const nested = stripImagesFromBlocks(block.content);
+      if (nested === block.content) {
+        // Inner content unchanged → reuse original block reference.
+        out.push(block);
+      } else {
+        changed = true;
+        // If every nested block was an image, collapse content to "" so the
+        // upstream receives a valid (empty-string) tool_result rather than [].
+        const newContent: string | AnthropicContentBlock[] = nested.length === 0 ? "" : nested;
+        out.push({ ...block, content: newContent });
+      }
+      continue;
+    }
+    out.push(block);
+  }
+  return changed ? out : (blocks as AnthropicContentBlock[]);
+}
+
+export const STRIP_IMAGES_PRESET: AnthropicRectifier = {
+  requestTransform: (req: AnthropicRequest): AnthropicRequest => {
+    let messagesChanged = false;
+    const messages = req.messages.map((msg) => {
+      if (typeof msg.content === "string") return msg;
+      const stripped = stripImagesFromBlocks(msg.content);
+      if (stripped === msg.content) return msg; // no images touched, same ref
+      messagesChanged = true;
+      // All blocks were images — keep the turn with a placeholder so the
+      // conversation ordering is preserved and the user sees what happened.
+      if (stripped.length === 0) {
+        const placeholder: AnthropicContentBlock = {
+          type: "text",
+          text: STRIP_IMAGES_PLACEHOLDER,
+        };
+        return { ...msg, content: [placeholder] };
+      }
+      return { ...msg, content: stripped };
+    });
+
+    let systemChanged = false;
+    let system: AnthropicRequest["system"] = req.system;
+    if (Array.isArray(system)) {
+      const stripped = stripImagesFromBlocks(system);
+      if (stripped !== system) {
+        systemChanged = true;
+        // If the whole system prompt was images (rare), drop it entirely.
+        system = stripped.length === 0 ? undefined : stripped;
+      }
+    }
+
+    if (!messagesChanged && !systemChanged) return req;
+    return systemChanged ? { ...req, messages, system } : { ...req, messages };
+  },
+};
+
 /** preset name → default Rectifier (no rule → not in dict, add wizard uses .has() to check) */
 export const BUILTIN_PRESETS: Record<string, AnthropicRectifier> = {
   "opencode-go": OPENCODE_GO_PRESET,
   kimi: KIMI_PRESET,
+  "strip-images": STRIP_IMAGES_PRESET,
 };
 
 /**
@@ -211,6 +316,10 @@ export const RULE_DEFS: Record<string, { label: string; hint: string }> = {
   kimi: {
     label: "kimi — normalize thinking.type",
     hint: "coerce thinking.type to 'enabled' / 'disabled' string (fixes 400)",
+  },
+  "strip-images": {
+    label: "strip-images — drop image content blocks",
+    hint: "removes image blocks from messages (use for vision-incapable models like mimo-v2.5-pro)",
   },
 };
 

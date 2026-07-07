@@ -11,6 +11,7 @@ import {
   OPENCODE_GO_PRESET,
   OPENCODE_GO_OPENAI_PRESET,
   KIMI_PRESET,
+  STRIP_IMAGES_PRESET,
   BUILTIN_PRESETS,
   BUILTIN_PRESETS_OPENAI,
   RULE_DEFS,
@@ -19,7 +20,12 @@ import {
   resolveRectifierByName,
   resolvePresetHeaders,
 } from "../src/preset-rules.js";
-import type { AnthropicRequest, AnthropicRectifier } from "../src/types.js";
+import type {
+  AnthropicContentBlock,
+  AnthropicMessage,
+  AnthropicRequest,
+  AnthropicRectifier,
+} from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 
@@ -99,6 +105,228 @@ describe("KIMI_PRESET.requestTransform — thinking.type 归一三分支", () =>
 
 // ---------------------------------------------------------------------------
 
+describe("STRIP_IMAGES_PRESET.requestTransform — drop image content blocks", () => {
+  const transform = STRIP_IMAGES_PRESET.requestTransform!;
+
+  /** 造一个最小可用 req，但带可自定义的 messages / system（覆盖 strip-images 关心的字段） */
+  function makeStripReq(
+    messages: AnthropicMessage[],
+    system?: AnthropicRequest["system"],
+  ): AnthropicRequest {
+    return { model: "mimo-v2.5-pro", max_tokens: 1024, messages, system };
+  }
+
+  /** 短手：构造一个 base64 image block */
+  const imgBase64 = (): AnthropicContentBlock => ({
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "BASE64DATA" },
+  });
+  const imgUrl = (): AnthropicContentBlock => ({
+    type: "image",
+    source: { type: "url", url: "https://example.com/x.png" },
+  });
+  const imgFile = (): AnthropicContentBlock => ({
+    type: "image",
+    source: { type: "file", file_id: "file_abc" },
+  });
+  const PLACEHOLDER = "[image stripped by cclau — model does not support vision]";
+
+  // ─── no-op 路径（透传原引用） ─────────────────────────────────────────
+
+  test("messages 为空数组 → 原 req 透传", () => {
+    const req = makeStripReq([]);
+    expect(transform(req)).toBe(req);
+  });
+
+  test("字符串 content → 原 message 透传", () => {
+    const req = makeStripReq([{ role: "user", content: "hi" }]);
+    expect(transform(req)).toBe(req);
+  });
+
+  test("数组 content 不含 image → 原 message 透传", () => {
+    const req = makeStripReq([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    expect(transform(req)).toBe(req);
+  });
+
+  test("system 是字符串 → 透传", () => {
+    const req = makeStripReq([], "you are helpful");
+    expect(transform(req)).toBe(req);
+  });
+
+  test("system 是数组但不含 image → 透传", () => {
+    const req = makeStripReq([], [{ type: "text", text: "you are helpful" }]);
+    expect(transform(req)).toBe(req);
+  });
+
+  // ─── 基础剥离 ────────────────────────────────────────────────────────
+
+  test("user 消息 text + image → image 剥掉，text 保留", () => {
+    const textBlock: AnthropicContentBlock = { type: "text", text: "看看这张图" };
+    const req = makeStripReq([
+      { role: "user", content: [textBlock, imgBase64()] },
+    ]);
+    const out = transform(req);
+    expect(out).not.toBe(req);
+    expect(out.messages[0]!.content).toEqual([textBlock]);
+  });
+
+  test("user 消息全是 image → 替换为占位文本", () => {
+    const req = makeStripReq([{ role: "user", content: [imgBase64()] }]);
+    const out = transform(req);
+    expect(out.messages[0]!.content).toEqual([
+      { type: "text", text: PLACEHOLDER },
+    ]);
+  });
+
+  test("user 消息混合多个 image → 全部剥掉，只留 text", () => {
+    const textBlock: AnthropicContentBlock = { type: "text", text: "before" };
+    const textBlock2: AnthropicContentBlock = { type: "text", text: "after" };
+    const req = makeStripReq([
+      { role: "user", content: [textBlock, imgBase64(), imgUrl(), textBlock2] },
+    ]);
+    const out = transform(req);
+    expect(out.messages[0]!.content).toEqual([textBlock, textBlock2]);
+  });
+
+  test("三种 image source（base64 / url / file）全部被剥", () => {
+    const req = makeStripReq([
+      { role: "user", content: [imgBase64(), imgUrl(), imgFile()] },
+    ]);
+    const out = transform(req);
+    // 全是 image → 触发占位替换
+    expect(out.messages[0]!.content).toEqual([
+      { type: "text", text: PLACEHOLDER },
+    ]);
+  });
+
+  // ─── assistant / tool_result / system ────────────────────────────────
+
+  test("assistant 消息含 image → 防御性剥掉", () => {
+    const req = makeStripReq([
+      { role: "assistant", content: [{ type: "text", text: "ok" }, imgBase64()] },
+    ]);
+    const out = transform(req);
+    expect(out.messages[0]!.content).toEqual([
+      { type: "text", text: "ok" },
+    ]);
+  });
+
+  test("tool_result 的 content（数组）含 image → 递归剥掉", () => {
+    const tr: AnthropicContentBlock = {
+      type: "tool_result",
+      tool_use_id: "t1",
+      content: [{ type: "text", text: "screenshot bytes:" }, imgBase64()],
+    };
+    const req = makeStripReq([{ role: "user", content: [tr] }]);
+    const out = transform(req);
+    const outContent = out.messages[0]!.content;
+    expect(Array.isArray(outContent)).toBe(true);
+    const outTr = (outContent as AnthropicContentBlock[])[0]!;
+    expect(outTr.type).toBe("tool_result");
+    if (outTr.type === "tool_result") {
+      expect(outTr.content).toEqual([{ type: "text", text: "screenshot bytes:" }]);
+      // tool_use_id 等其他字段保留
+      expect(outTr.tool_use_id).toBe("t1");
+    }
+  });
+
+  test("tool_result 的 content 全是 image → 折叠成空字符串（上游合法）", () => {
+    const tr: AnthropicContentBlock = {
+      type: "tool_result",
+      tool_use_id: "t1",
+      content: [imgBase64(), imgUrl()],
+    };
+    const req = makeStripReq([{ role: "user", content: [tr] }]);
+    const out = transform(req);
+    const outContent = out.messages[0]!.content;
+    expect(Array.isArray(outContent)).toBe(true);
+    const outTr = (outContent as AnthropicContentBlock[])[0]!;
+    expect(outTr.type).toBe("tool_result");
+    if (outTr.type === "tool_result") {
+      expect(outTr.content).toBe("");
+    }
+  });
+
+  test("system 是数组且含 image → 剥掉", () => {
+    const req = makeStripReq(
+      [{ role: "user", content: "hi" }],
+      [{ type: "text", text: "sys" }, imgBase64()],
+    );
+    const out = transform(req);
+    expect(out.system).toEqual([{ type: "text", text: "sys" }]);
+  });
+
+  test("system 是数组且全是 image → 整个 system 字段被丢弃", () => {
+    const req = makeStripReq(
+      [{ role: "user", content: "hi" }],
+      [imgBase64()],
+    );
+    const out = transform(req);
+    expect(out.system).toBeUndefined();
+  });
+
+  // ─── 多 message / 不可变性 ───────────────────────────────────────────
+
+  test("多 message 各自独立处理（剥离其中一条不影响其他）", () => {
+    const req = makeStripReq([
+      { role: "user", content: [{ type: "text", text: "no image here" }] },
+      { role: "user", content: [{ type: "text", text: "see image" }, imgBase64()] },
+      { role: "assistant", content: "ok" },
+    ]);
+    const out = transform(req);
+    expect(out.messages[0]!.content).toEqual([{ type: "text", text: "no image here" }]);
+    expect(out.messages[1]!.content).toEqual([{ type: "text", text: "see image" }]);
+    expect(out.messages[2]!.content).toBe("ok");
+  });
+
+  test("不可变：input 的 messages / content 数组不被 mutate", () => {
+    const originalContent: AnthropicContentBlock[] = [
+      { type: "text", text: "hi" },
+      imgBase64(),
+    ];
+    const originalMessages: AnthropicMessage[] = [
+      { role: "user", content: originalContent },
+    ];
+    const originalSystem: AnthropicContentBlock[] = [
+      { type: "text", text: "sys" },
+      imgBase64(),
+    ];
+    const req = makeStripReq(originalMessages, originalSystem);
+    const originalContentLen = originalContent.length;
+    const originalSystemLen = originalSystem.length;
+
+    transform(req);
+
+    expect(originalContent).toHaveLength(originalContentLen);
+    expect(originalContent.some((b) => b.type === "image")).toBe(true);
+    expect(originalSystem).toHaveLength(originalSystemLen);
+    expect(originalSystem.some((b) => b.type === "image")).toBe(true);
+    // 原 message 对象本身也没被换
+    expect(req.messages[0]!.content).toBe(originalContent);
+  });
+
+  // ─── 字段保留 ────────────────────────────────────────────────────────
+
+  test("剥离后 req 上其他顶层字段（model / max_tokens / temperature / tools）保留", () => {
+    const req: AnthropicRequest = {
+      model: "mimo-v2.5-pro",
+      max_tokens: 1024,
+      temperature: 0.5,
+      messages: [{ role: "user", content: [{ type: "text", text: "see" }, imgBase64()] }],
+      tools: [{ name: "x", input_schema: {} }],
+    };
+    const out = transform(req);
+    expect(out.model).toBe("mimo-v2.5-pro");
+    expect(out.max_tokens).toBe(1024);
+    expect(out.temperature).toBe(0.5);
+    expect(out.tools).toEqual([{ name: "x", input_schema: {} }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe("resolvePresetHeaders — sentinel 替换", () => {
   test("OPENCODE_GO_PRESET + apiKey → Authorization: Bearer ${apiKey}", () => {
     const out = resolvePresetHeaders(OPENCODE_GO_PRESET, "sk-abc");
@@ -161,6 +389,10 @@ describe("BUILTIN_PRESETS 字典 + 常量", () => {
     expect(BUILTIN_PRESETS["kimi"]).toBe(KIMI_PRESET);
   });
 
+  test('"strip-images" → STRIP_IMAGES_PRESET（同一引用）', () => {
+    expect(BUILTIN_PRESETS["strip-images"]).toBe(STRIP_IMAGES_PRESET);
+  });
+
   test("未知 preset 名 → undefined（add wizard 用 .has() 判断）", () => {
     expect(BUILTIN_PRESETS["nonexistent"]).toBeUndefined();
     expect(BUILTIN_PRESETS[""]).toBeUndefined();
@@ -197,6 +429,10 @@ describe("resolveRectifierByName — profile 名 → AnthropicRectifier", () => 
 
   test('"kimi" → KIMI_PRESET（同一引用）', () => {
     expect(resolveRectifierByName("kimi")).toBe(KIMI_PRESET);
+  });
+
+  test('"strip-images" → STRIP_IMAGES_PRESET（同一引用）', () => {
+    expect(resolveRectifierByName("strip-images")).toBe(STRIP_IMAGES_PRESET);
   });
 
   test("未知名字 → undefined（registry build 用来 silent fallback）", () => {

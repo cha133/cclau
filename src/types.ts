@@ -117,11 +117,26 @@ export interface AnthropicMessage {
   content: string | AnthropicContentBlock[];
 }
 
+/**
+ * Anthropic image content block — claude-code sends these when the user attaches
+ * an image. Sidecar passes them through unchanged in rectify mode. Source shape
+ * per Anthropic's API spec:
+ *   - base64: inline data (media_type + base64-encoded data)
+ *   - url: external URL the upstream fetches
+ *   - file: pre-uploaded file_id
+ * Rectifiers (e.g. `strip-images`) may filter these out by `block.type === "image"`.
+ */
+export type AnthropicImageSource =
+  | { type: "base64"; media_type: string; data: string }
+  | { type: "url"; url: string }
+  | { type: "file"; file_id: string };
+
 export type AnthropicContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content: string | AnthropicContentBlock[]; is_error?: boolean };
+  | { type: "tool_result"; tool_use_id: string; content: string | AnthropicContentBlock[]; is_error?: boolean }
+  | { type: "image"; source: AnthropicImageSource };
 
 export interface AnthropicTool {
   name: string;

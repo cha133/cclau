@@ -78,6 +78,7 @@ The wizard shows a mode-aware single-select picker. Same vendor name may resolve
 - **rectify mode** (anthropic-protocol sidecar → upstream):
   - **opencode-go** — adds an `Authorization: Bearer <apiKey>` header alongside the default `x-api-key` (fixes 401 on OpenCode Go)
   - **kimi** — normalizes `thinking.type` to the supported string values (fixes 400 on Kimi thinking effort)
+  - **strip-images** — removes `image` content blocks from `messages` (also nested in `tool_result.content` and `system`) for vision-incapable upstreams/models like `mimo-v2.5-pro` (fixes "model does not support image" 4xx)
 - **openai mode** (anthropic → openai-converted → upstream):
   - **opencode-go** — drops `thinking` when `reasoning_effort` is also set (avoids opencode-go's chat-completions endpoint returning HTTP 400 "cannot specify both")
 
