@@ -402,6 +402,7 @@ const NO_RECTIFIER_SENTINEL = "__cclau_no_rectifier__";
 async function pickBuiltinRectifier(
   preset: BuiltinPreset,
   mode: Mode,
+  initialValueOverride?: string,
 ): Promise<string | undefined> {
   // Mode-aware rule lookup: same vendor name, different rule body per mode.
   const rulesByMode =
@@ -428,8 +429,18 @@ async function pickBuiltinRectifier(
     }),
   ];
 
-  // Default = preset's own rule in this mode if it exists, else "none".
-  const initialValue = rulesByMode[preset.name] ? preset.name : NO_RECTIFIER_SENTINEL;
+  // Default = explicit override (if valid for this mode) > preset's own rule
+  // in this mode if it exists > "none". Override is used by the edit wizard to
+  // pre-select the profile's current rectifier; preset-driven default is used
+  // by the add wizard to suggest the vendor's matched rule.
+  let initialValue: string;
+  if (initialValueOverride && rulesByMode[initialValueOverride]) {
+    initialValue = initialValueOverride;
+  } else if (rulesByMode[preset.name]) {
+    initialValue = preset.name;
+  } else {
+    initialValue = NO_RECTIFIER_SENTINEL;
+  }
 
   const result = checkCancel(
     await p.select<string>({
@@ -538,8 +549,8 @@ export async function promptAdd(): Promise<Profile> {
 /**
  * 交互式编辑一个 profile。按固定顺序走 endpoint → apiKey → mode →
  * model → 1m，每步 `initialValue` pre-fill 当前值。除了
- * `endpoint / apiKey / mode / model / supports1m` 之外的字段
- * （`name / vendor / rectifier / createdAt` / **全局 default**）一律
+ * `endpoint / apiKey / mode / model / supports1m / rectifier` 之外的字段
+ * （`name / vendor / createdAt` / **全局 default**）一律
  * frozen，wizard 一开始用 console.log 把不可改字段打出来。
  *
  * Global `default` is NOT editable here — use `cclau default <name>` to
@@ -566,18 +577,21 @@ export async function promptEdit(existing: Profile): Promise<Profile> {
   // 3. Mode
   const mode = await promptMode(existing.mode);
 
-  // 4. Fetch model list (用新的 endpoint + apiKey)
+  // 4. Rectifier rule (mode-aware; pre-select current value if still valid)
+  const pickedRule = await pickBuiltinRectifier(CUSTOM_PRESET, mode, existing.rectifier);
+
+  // 5. Fetch model list (用新的 endpoint + apiKey)
   const models = await loadModels(endpoint, apiKey);
   // 如果用户之前用了自定义 model，autocomplete 选不上 → 前置
   const modelsWithPrior = maybePrependCustomModel(models, existing.model);
 
-  // 5. Model
+  // 6. Model
   const model = await promptModel("Pick model:", modelsWithPrior, existing.model);
 
-  // 6. 1M
+  // 7. 1M
   const supports1m = await prompt1m(model, existing.supports1m);
 
-  // 7. Build & return
+  // 8. Build & return
   const updated: Profile = {
     name: existing.name,
     endpoint,
@@ -587,8 +601,7 @@ export async function promptEdit(existing: Profile): Promise<Profile> {
     supports1m,
     updatedAt: Date.now(),
     createdAt: existing.createdAt,
-    // rectifier 原样保留，wizard 不让改 → hand-edit TOML
-    ...(existing.rectifier ? { rectifier: existing.rectifier } : {}),
+    ...(pickedRule ? { rectifier: pickedRule } : {}),
   };
   return updated;
 }

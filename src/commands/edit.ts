@@ -41,7 +41,10 @@ export async function editCmd(name: string): Promise<void> {
     }
 
     await upsertProfile(updated);
-    success(`saved profile "${updated.name}"`);
+    const rectHint = updated.rectifier ? " (rectifier enabled)" : "";
+    success(
+      `saved profile "${updated.name}" (${updated.mode}, model: ${updated.model}${rectHint})`,
+    );
   } catch (err) {
     error(String(err));
     process.exit(1);
@@ -54,6 +57,7 @@ function isChanged(a: Profile, b: Profile): boolean {
     a.apiKey !== b.apiKey ||
     a.mode !== b.mode ||
     a.model !== b.model ||
-    a.supports1m !== b.supports1m
+    a.supports1m !== b.supports1m ||
+    a.rectifier !== b.rectifier
   );
 }
