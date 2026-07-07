@@ -23,7 +23,7 @@ import type { Config, Profile, StoredProfile } from "./types.js";
 /**
  * Thrown by `loadAppConfig` when the on-disk config uses the old per-profile
  * `default = true` schema (pre-global-default). User must hand-edit to remove
- * those lines and re-run `cclau default <name>` once.
+ * those lines and re-run `cclau use <name>` once.
  *
  * Per user decision: no automatic migration. The error message is the migration
  * recipe.
@@ -33,7 +33,7 @@ export class LegacyConfigError extends Error {
   constructor(offendingProfile: string) {
     super(
       `cclau config uses old per-profile \`default\` field (in profile "${offendingProfile}").\n` +
-        `Migrate: run \`cclau default <your-default-profile-name>\` once.\n` +
+        `Migrate: run \`cclau use <your-default-profile-name>\` once.\n` +
         `For read-only inspection, hand-edit your config.toml to remove the\n` +
         `\`default = true\` lines first.`,
     );
@@ -149,7 +149,7 @@ export function listProfileNames(): string[] {
  * key is absent (never set, or cleared).
  *
  * Use this when the caller wants to know "is the key set" rather than
- * "does the key point to a real profile". E.g. `default.ts` show-mode for
+ * "does the key point to a real profile". E.g. `use.ts` show-mode for
  * displaying the literal name including dangling references.
  */
 export function getDefaultName(): string | undefined {

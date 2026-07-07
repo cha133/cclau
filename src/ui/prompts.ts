@@ -553,7 +553,7 @@ export async function promptAdd(): Promise<Profile> {
  * （`name / vendor / createdAt` / **全局 default**）一律
  * frozen，wizard 一开始用 console.log 把不可改字段打出来。
  *
- * Global `default` is NOT editable here — use `cclau default <name>` to
+ * Global `default` is NOT editable here — use `cclau use <name>` to
  * switch the active profile.
  */
 export async function promptEdit(existing: Profile): Promise<Profile> {

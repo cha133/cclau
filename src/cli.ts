@@ -13,15 +13,15 @@ import pkg from "../package.json" with { type: "json" };
 import { addCmd } from "./commands/add.js";
 import { editCmd } from "./commands/edit.js";
 import { listCmd } from "./commands/ls.js";
-import { registerDefault } from "./commands/default.js";
+import { registerUse } from "./commands/use.js";
 import { launchCmd, launchDefault } from "./commands/launch.js";
 import { rmCmd } from "./commands/rm.js";
 import { showCmd } from "./commands/show.js";
 
 // commander-known subcommands. Add or remove here only.
 // Final list (see .claude/02-cli-routing.md § rule 4):
-//   add edit rm remove ls list show default help version
-// Removed: doctor models alias switch profile (and its subcommand group)
+//   add edit rm remove ls list show use help version
+// Removed: doctor models alias switch profile default (and its subcommand group)
 const KNOWN_SUBCOMMANDS = new Set([
   "add",
   "edit",
@@ -30,7 +30,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "ls",
   "list",
   "show",
-  "default",
+  "use",
   "help",
   "version",
 ]);
@@ -80,8 +80,8 @@ program
     showCmd(name);
   });
 
-// nvm-style default subcommand group (see src/commands/default.ts)
-registerDefault(program);
+// nvm-style `use` subcommand (see src/commands/use.ts) — aligned with ../ccswi
+registerUse(program);
 
 // ============================================================================
 // main routing

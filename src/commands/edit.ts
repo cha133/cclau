@@ -2,7 +2,7 @@
 //
 // Real interactive flow lives in src/ui/prompts.ts::promptEdit().
 // This file is a thin wrapper: fuzzy-resolve name → run wizard → persist.
-// `default` is global and not editable here; use `cclau default <name>` to switch.
+// `default` is global and not editable here; use `cclau use <name>` to switch.
 
 import {
   getProfile,

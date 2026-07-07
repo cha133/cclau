@@ -20,7 +20,7 @@ bun link          # expose `cclau` globally
 
 ```bash
 cclau add           # interactive wizard: vendor → mode → endpoint → key → model → 1m → name
-cclau default work  # mark "work" as the default profile
+cclau use work      # mark "work" as the default profile
 cclau               # launch Claude Code with the default profile
 cclau work          # launch Claude Code with a specific profile
 cclau work -c       # launch with claude args (everything after profile name passes through)
@@ -35,7 +35,7 @@ cclau work -c       # launch with claude args (everything after profile name pas
 | `cclau rm <name>` | Remove a profile |
 | `cclau ls` | List all profiles |
 | `cclau show <name>` | Show profile details |
-| `cclau default [name]` | Show or set the default profile (nvm-style) |
+| `cclau use [name]` | Show or set the active profile (nvm-style) |
 | `cclau <name> [claude args…]` | Launch Claude Code with a profile |
 | `cclau -h` / `cclau --help` | Show cclau help |
 | `cclau -v` / `cclau --version` | Show cclau version |
@@ -123,11 +123,11 @@ Set `supports1m = true` and Claude Code will use the 1M context window when give
 
 ## Behavior notes
 
-- **First profile added becomes the default automatically** — `cclau` (no args) works immediately after `cclau add`. Subsequent adds do NOT auto-default; pick explicitly with `cclau default <name>`. The trigger is lazy: a dangling `default` (references a profile that no longer exists) is treated as unset, so the next `cclau add` overwrites it.
-- **Removing the current default profile auto-promotes the next one** (alphabetical, first by name) so `cclau` keeps working. If you remove the last profile, the `default` key is left stale (pointing at the removed name) — the next `cclau add` overwrites it, or run `cclau default <name>` after to set explicitly.
-- **The default profile lives at the top of `config.toml`** as `default = "<profile-name>"` (single source of truth; multi-default cannot occur). `cclau edit` does NOT change the default — use `cclau default <other>` to switch.
+- **First profile added becomes the default automatically** — `cclau` (no args) works immediately after `cclau add`. Subsequent adds do NOT auto-default; pick explicitly with `cclau use <name>`. The trigger is lazy: a dangling `default` (references a profile that no longer exists) is treated as unset, so the next `cclau add` overwrites it.
+- **Removing the current default profile auto-promotes the next one** (alphabetical, first by name) so `cclau` keeps working. If you remove the last profile, the `default` key is left stale (pointing at the removed name) — the next `cclau add` overwrites it, or run `cclau use <name>` after to set explicitly.
+- **The default profile lives at the top of `config.toml`** as `default = "<profile-name>"` (single source of truth; multi-default cannot occur). `cclau edit` does NOT change the default — use `cclau use <other>` to switch.
 - **Profile fields not specified in the wizard are left at their default** — `add` always sets `supports1m` and `mode`; `edit` lets you change any of `endpoint / apiKey / mode / model / supports1m`. To tweak things the wizard doesn't expose, hand-edit the TOML.
-- **Upgrading from a pre-global-default config** — if you have a `default = true` line under any `[profiles.<name>]` from a previous cclau version, every command will refuse to run until you migrate. Hand-delete those `default = true` lines from your `config.toml`, then run `cclau default <your-default-name>` once.
+- **Upgrading from a pre-global-default config** — if you have a `default = true` line under any `[profiles.<name>]` from a previous cclau version, every command will refuse to run until you migrate. Hand-delete those `default = true` lines from your `config.toml`, then run `cclau use <your-default-name>` once.
 
 ## Debugging
 

@@ -233,7 +233,7 @@ describe("legacy config detection (old per-profile `default = true`)", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(LegacyConfigError);
       expect((err as LegacyConfigError).message).toContain("old per-profile");
-      expect((err as LegacyConfigError).message).toContain("cclau default");
+      expect((err as LegacyConfigError).message).toContain("cclau use");
       expect((err as LegacyConfigError).offendingProfile).toBe("x");
     }
   });

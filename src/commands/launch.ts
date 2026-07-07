@@ -118,7 +118,7 @@ export async function launchDefault(args: string[], debug = false): Promise<void
   const def = getDefaultProfile();
   if (!def) {
     error("(no default profile)");
-    info(`run ${pc.cyan("`cclau default <name>`")} to set one.`);
+    info(`run ${pc.cyan("`cclau use <name>`")} to set one.`);
     process.exit(1);
   }
   await launchCmd(def.name, args, debug);

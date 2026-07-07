@@ -1,15 +1,16 @@
 // ============================================================================
-// cclau default [name]
+// cclau use [name]
 //
 // nvm-style:
-//   cclau default              -- show current default profile
-//   cclau default <name>       -- set as default (fuzzy match)
+//   cclau use                  -- show current default (active) profile
+//   cclau use <name>           -- set as default / switch to (fuzzy match)
 //
-// Default is a global key (config top-level `default = "<profile-name>"`),
-// single source of truth. Multi-default is impossible by construction.
+// Aligned with ../ccswi's `use` command naming. The underlying config field
+// is still `Config.default` (top-level TOML key, single source of truth);
+// only the CLI verb changed. Multi-default is impossible by construction.
 // ============================================================================
 
-import { Command } from "commander";
+import type { Command } from "commander";
 import { fuzzyTopN, isAmbiguous } from "../fuzzy.js";
 import {
   getDefaultName,
@@ -20,22 +21,22 @@ import {
 } from "../config.js";
 import { success, error, info, pc } from "../ui/format.js";
 
-export function registerDefault(program: Command): void {
+export function registerUse(program: Command): void {
   program
-    .command("default [name]")
-    .description("Show or set the default profile (nvm-style)")
+    .command("use [name]")
+    .description("Show or set the active profile (nvm-style)")
     .action(async (name?: string) => {
       if (!name) {
-        showDefault();
+        showActive();
         return;
       }
-      await setDefaultCmd(name);
+      await switchTo(name);
     });
 }
 
 // ---------------------------------------------------------------------------
 
-function showDefault(): void {
+function showActive(): void {
   const def = getDefaultProfile();
   if (def) {
     console.log(
@@ -44,20 +45,20 @@ function showDefault(): void {
     return;
   }
 
-  // No resolvable default — either truly absent or dangling (cfg.default points
+  // No resolvable active — either truly absent or dangling (cfg.default points
   // to a profile that no longer exists). Distinguish for diagnostics.
   const raw = getDefaultName();
   if (raw !== undefined) {
     info(`(default reference "${pc.cyan(raw)}" is stale — profile no longer exists)`);
-    info(`run ${pc.cyan("`cclau default <name>`")} to set a new one.`);
+    info(`run ${pc.cyan("`cclau use <name>`")} to set a new one.`);
     return;
   }
 
-  info("(no default profile)");
-  info(`run ${pc.cyan("`cclau default <name>`")} to set one.`);
+  info("(no active profile)");
+  info(`run ${pc.cyan("`cclau use <name>`")} to set one.`);
 }
 
-async function setDefaultCmd(name: string): Promise<void> {
+async function switchTo(name: string): Promise<void> {
   const profiles = listProfiles();
   if (profiles.length === 0) {
     error(`no profiles yet. run ${pc.cyan("`cclau add`")} to create one.`);
@@ -86,10 +87,10 @@ async function setDefaultCmd(name: string): Promise<void> {
   }
 
   if (getDefaultName() === resolved) {
-    info(`"${resolved}" is already default`);
+    info(`"${resolved}" is already active`);
     return;
   }
 
   await setDefault(resolved);
-  success(`default → "${resolved}"`);
+  success(`switched to "${resolved}"`);
 }

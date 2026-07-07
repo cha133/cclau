@@ -62,7 +62,7 @@ export function showCmd(name?: string): void {
     const def = getDefaultProfile();
     if (!def) {
       error(`(no default profile)`);
-      info(`run ${pc.cyan("`cclau default <name>`")} to set one.`);
+      info(`run ${pc.cyan("`cclau use <name>`")} to set one.`);
       process.exit(1);
     }
     resolvedName = def.name;
