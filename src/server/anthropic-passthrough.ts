@@ -102,6 +102,8 @@ export async function* passthroughStream(
   const reader = upstreamRes.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const log = getDebugLogger();
+  let messageId = "upstream";
 
   try {
     while (true) {
@@ -129,7 +131,10 @@ export async function* passthroughStream(
           // v1: actually call streamChunkTransform (v0 missed this)
           const events = applyStreamRectifier(rect, [data]);
           const out = (events[0] ?? data) as AnthropicStreamEvent;
-          getDebugLogger().logUpstreamChunk(out.type, out);
+          if (out.type === "message_start") {
+            messageId = out.message.id;
+          }
+          log.logUpstreamAnthropic(messageId, out.type, out);
           yield out;
         } catch (err) {
           // skip parse failures (keep-alive or ping)

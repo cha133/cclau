@@ -553,6 +553,56 @@ describe("DebugLogger — logUpstreamOpenaiControl", () => {
 });
 
 // ============================================================================
+// logUpstreamAnthropic — rectify/direct upstream aggregation. This mirrors the
+// downstream Anthropic SSE aggregation so passthrough streams do not log one
+// line per tiny content_block_delta.
+// ============================================================================
+
+describe("DebugLogger — logUpstreamAnthropic (content_block_delta aggregation)", () => {
+  test("consecutive text_delta for same index → ONE upstream summary at stop", () => {
+    const log = getDebugLogger();
+    log.logUpstreamAnthropic("msg_up", "message_start", {
+      type: "message_start",
+      message: { id: "msg_up" },
+    });
+    log.logUpstreamAnthropic("msg_up", "content_block_start", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    for (const ch of ["茶", "茶", "在", "测", "试"]) {
+      log.logUpstreamAnthropic("msg_up", "content_block_delta", {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: ch },
+      });
+    }
+    log.logUpstreamAnthropic("msg_up", "content_block_stop", {
+      type: "content_block_stop",
+      index: 0,
+    });
+
+    const text = readAllLogs();
+    const perEventCount = (text.match(/--- UPSTREAM content_block_delta ---/g) ?? []).length;
+    expect(perEventCount).toBe(0);
+    expect(text).toContain("--- UPSTREAM content_block_summary ---");
+    expect(text).toContain('"delta_count":5');
+    expect(text).toContain('"total_chars":5');
+    expect(text).toContain('"preview":"茶茶在测试"');
+    expect(text).toContain('"_cumulative_text_chars":5');
+  });
+
+  test("sparse upstream events are still logged individually", () => {
+    const log = getDebugLogger();
+    log.logUpstreamAnthropic("msg_up", "ping", { type: "ping" });
+    log.logUpstreamAnthropic("msg_up", "message_stop", { type: "message_stop" });
+    const text = readAllLogs();
+    expect(text).toContain("--- UPSTREAM ping ---");
+    expect(text).toContain("--- UPSTREAM message_stop ---");
+  });
+});
+
+// ============================================================================
 // NULL_LOGGER path — CCLAU_DEBUG unset. Pin this so a future change that
 // accidentally turns logging on by default (or makes getDebugLogger() read
 // the env once at import time) gets caught.

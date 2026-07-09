@@ -17,7 +17,8 @@
 //   stream Chinese characters 1-3 at a time — logging each chunk as its own
 //   line bloats a typical session to 500KB+. Aggregation buffers consecutive
 //   `delta.content` / `delta.reasoning_content` chunks within the same
-//   chatcmpl-id + block, flushing one line per block boundary.
+//   chatcmpl-id + block, flushing one line per block boundary. Rectify-mode
+//   Anthropic SSE receives the same treatment for `content_block_delta`.
 // - **Downstream SSE logging**: cclau previously logged upstream chunks but
 //   never the events it forwards to claude-code, so "did we eat a character?"
 //   bugs were guesswork. `logDownstream` records the actual forwarded events.
@@ -41,6 +42,11 @@ export interface DebugLogger {
    *  the raw chat.completion.chunk; for anthropic passthrough it's the
    *  post-rectification event (which equals downstream — see logDownstream). */
   logUpstreamChunk(event: string, data: unknown): void;
+
+  /** Aggregated upstream Anthropic SSE event. Used by rectify/direct passthrough
+   *  after stream rectification. Sparse events are logged individually; dense
+   *  content_block_delta runs are summarized like logDownstream. */
+  logUpstreamAnthropic(messageId: string, event: string, data: unknown): void;
 
   /** Downstream SSE event actually forwarded to claude-code. text_delta events
    *  are auto-suffixed with `(cumulative N chars)` so a missing-character
@@ -182,7 +188,7 @@ function buildLogger(): DebugLogger {
   ensureAppStateDir();
   const logPath = sessionLogPath();
 
-  // Per-block aggregation for downstream content_block_delta events,
+  // Per-block aggregation for Anthropic content_block_delta events,
   // keyed by `${messageId}#${blockIndex}` so two concurrent requests with
   // the same block index never collide on a shared aggregator. Without
   // this key split, every Chinese char streamed as its own content_block_delta
@@ -203,61 +209,37 @@ function buildLogger(): DebugLogger {
     totalChars: number;
     preview: string;
   };
-  const blockAggs = new Map<string, BlockAgg>();
-  // Per-message text-chars counter, scoped by messageId. Used to stamp
-  // `_cumulative_text_chars` in the block summary without leaking across
-  // concurrent requests.
-  const textCharsByMessage = new Map<string, number>();
-  const blockKey = (msgId: string, idx: number): string => `${msgId}#${idx}`;
 
-  const flushBlockAgg = (key: string, messageId: string, reason: string) => {
-    const agg = blockAggs.get(key);
-    if (!agg) return;
-    const summary = {
-      index: agg.index,
-      type: agg.type,
-      delta_count: agg.deltaCount,
-      delta_type: agg.deltaType,
-      total_chars: agg.totalChars,
-      preview: agg.preview,
-      _cumulative_text_chars:
-        agg.type === "text" ? (textCharsByMessage.get(messageId) ?? 0) : undefined,
-      _flush_reason: reason,
+  const makeAnthropicLogger = (label: "UPSTREAM" | "DOWNSTREAM") => {
+    const blockAggs = new Map<string, BlockAgg>();
+    // Per-message text-chars counter, scoped by messageId. Used to stamp
+    // `_cumulative_text_chars` in the block summary without leaking across
+    // concurrent requests.
+    const textCharsByMessage = new Map<string, number>();
+    const blockKey = (msgId: string, idx: number): string => `${msgId}#${idx}`;
+
+    const flushBlockAgg = (key: string, messageId: string, reason: string) => {
+      const agg = blockAggs.get(key);
+      if (!agg) return;
+      const summary = {
+        index: agg.index,
+        type: agg.type,
+        delta_count: agg.deltaCount,
+        delta_type: agg.deltaType,
+        total_chars: agg.totalChars,
+        preview: agg.preview,
+        _cumulative_text_chars:
+          agg.type === "text" ? (textCharsByMessage.get(messageId) ?? 0) : undefined,
+        _flush_reason: reason,
+      };
+      writeLines(logPath, [
+        `--- ${label} content_block_summary ---`,
+        JSON.stringify(summary),
+      ]);
+      blockAggs.delete(key);
     };
-    writeLines(logPath, [
-      `--- DOWNSTREAM content_block_summary ---`,
-      JSON.stringify(summary),
-    ]);
-    blockAggs.delete(key);
-  };
 
-  return {
-    logIn(url, headers, body) {
-      writeLines(logPath, [
-        `session log: ${logPath}`,
-        "--- IN ---",
-        url,
-        `headers: ${summarizeHeaders(headers)}`,
-        `body.thinking: ${JSON.stringify(extractThinking(body))}`,
-        `body.output_config.effort: ${JSON.stringify(extractOutputConfigEffort(body))}`,
-        `body.stream: ${JSON.stringify((body as { stream?: unknown })?.stream)}`,
-        `body.model: ${JSON.stringify((body as { model?: unknown })?.model)}`,
-      ]);
-    },
-    logOut(url, headers, body) {
-      writeLines(logPath, [
-        "--- OUT ---",
-        url,
-        `headers: ${summarizeHeaders(headers)}`,
-        `body.thinking: ${JSON.stringify(extractThinking(body))}`,
-        `body.reasoning_effort: ${JSON.stringify((body as { reasoning_effort?: unknown })?.reasoning_effort)}`,
-        `body.stream: ${JSON.stringify((body as { stream?: unknown })?.stream)}`,
-      ]);
-    },
-    logUpstreamChunk(event, data) {
-      writeLines(logPath, [`--- UPSTREAM ${event} ---`, JSON.stringify(data)]);
-    },
-    logDownstream(messageId, event, data) {
+    return (messageId: string, event: string, data: unknown) => {
       // content_block_delta: silently aggregate into the open block's
       // summary; flush happens at content_block_stop or message_stop.
       if (event === "content_block_delta") {
@@ -282,10 +264,7 @@ function buildLogger(): DebugLogger {
             // New (messageId, idx) slot. Defensive: in a well-formed stream
             // the prior block for this message would have been stopped before
             // a new one started streaming deltas. If we find another open
-            // block for the same message, the stream is malformed (or our
-            // aggregator missed a stop) — flush the orphan as "interrupted"
-            // so the next content_block_stop on it doesn't claim a phantom
-            // block.
+            // block for the same message, flush the orphan as "interrupted".
             const prefix = `${messageId}#`;
             for (const otherKey of [...blockAggs.keys()]) {
               if (otherKey.startsWith(prefix) && otherKey !== key) {
@@ -332,7 +311,7 @@ function buildLogger(): DebugLogger {
             return;
           }
           writeLines(logPath, [
-            `--- DOWNSTREAM content_block_summary ---`,
+            `--- ${label} content_block_summary ---`,
             JSON.stringify({ index: d.index, _flush_reason: "stop-without-deltas" }),
           ]);
           return;
@@ -355,9 +334,46 @@ function buildLogger(): DebugLogger {
       // Default: log the event individually (message_start / ping /
       // content_block_start / message_delta / message_stop / WARN).
       writeLines(logPath, [
-        `--- DOWNSTREAM ${event} ---`,
+        `--- ${label} ${event} ---`,
         JSON.stringify(clipTextFields(data, 200)),
       ]);
+    };
+  };
+
+  const logUpstreamAnthropicEvent = makeAnthropicLogger("UPSTREAM");
+  const logDownstreamEvent = makeAnthropicLogger("DOWNSTREAM");
+
+  return {
+    logIn(url, headers, body) {
+      writeLines(logPath, [
+        `session log: ${logPath}`,
+        "--- IN ---",
+        url,
+        `headers: ${summarizeHeaders(headers)}`,
+        `body.thinking: ${JSON.stringify(extractThinking(body))}`,
+        `body.output_config.effort: ${JSON.stringify(extractOutputConfigEffort(body))}`,
+        `body.stream: ${JSON.stringify((body as { stream?: unknown })?.stream)}`,
+        `body.model: ${JSON.stringify((body as { model?: unknown })?.model)}`,
+      ]);
+    },
+    logOut(url, headers, body) {
+      writeLines(logPath, [
+        "--- OUT ---",
+        url,
+        `headers: ${summarizeHeaders(headers)}`,
+        `body.thinking: ${JSON.stringify(extractThinking(body))}`,
+        `body.reasoning_effort: ${JSON.stringify((body as { reasoning_effort?: unknown })?.reasoning_effort)}`,
+        `body.stream: ${JSON.stringify((body as { stream?: unknown })?.stream)}`,
+      ]);
+    },
+    logUpstreamChunk(event, data) {
+      writeLines(logPath, [`--- UPSTREAM ${event} ---`, JSON.stringify(data)]);
+    },
+    logUpstreamAnthropic(messageId, event, data) {
+      logUpstreamAnthropicEvent(messageId, event, data);
+    },
+    logDownstream(messageId, event, data) {
+      logDownstreamEvent(messageId, event, data);
     },
     logUpstreamOpenaiText({ chatcmplId, text, chunkCount, durationMs }) {
       // 200-char preview is enough to eyeball the content; full text would
@@ -405,6 +421,7 @@ const NULL_LOGGER: DebugLogger = {
   logIn: () => {},
   logOut: () => {},
   logUpstreamChunk: () => {},
+  logUpstreamAnthropic: () => {},
   logDownstream: (_messageId: string, _event: string, _data: unknown) => {},
   logUpstreamOpenaiText: () => {},
   logUpstreamOpenaiReasoning: () => {},
