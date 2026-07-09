@@ -11,6 +11,7 @@
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { addCmd } from "./commands/add.js";
+import { cpCmd } from "./commands/cp.js";
 import { editCmd } from "./commands/edit.js";
 import { listCmd } from "./commands/ls.js";
 import { registerUse } from "./commands/use.js";
@@ -20,10 +21,11 @@ import { showCmd } from "./commands/show.js";
 
 // commander-known subcommands. Add or remove here only.
 // Final list (see .claude/02-cli-routing.md § rule 4):
-//   add edit rm remove ls list show use help version
+//   add cp edit rm remove ls list show use help version
 // Removed: doctor models alias switch profile default (and its subcommand group)
 const KNOWN_SUBCOMMANDS = new Set([
   "add",
+  "cp",
   "edit",
   "rm",
   "remove",
@@ -48,6 +50,13 @@ program
   .description("Interactively add a profile")
   .action(async () => {
     await addCmd();
+  });
+
+program
+  .command("cp <src> <new_name>")
+  .description("Clone a profile with a different model")
+  .action(async (src: string, newName: string) => {
+    await cpCmd(src, newName);
   });
 
 program

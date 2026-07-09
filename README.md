@@ -20,6 +20,7 @@ bun link          # expose `cclau` globally
 
 ```bash
 cclau add           # interactive wizard: vendor → mode → endpoint → key → model → 1m → name
+cclau cp work work-fast  # clone endpoint/key/mode, pick a different model, make it default
 cclau use work      # mark "work" as the default profile
 cclau               # launch Claude Code with the default profile
 cclau work          # launch Claude Code with a specific profile
@@ -31,6 +32,7 @@ cclau work -c       # launch with claude args (everything after profile name pas
 | Command | Purpose |
 |---|---|
 | `cclau add` | Interactively add a profile |
+| `cclau cp <src> <new_name>` | Clone a profile, pick model/1m, and make the clone active |
 | `cclau edit <name>` | Edit a profile (endpoint / key / mode / model / 1m) |
 | `cclau rm <name>` | Remove a profile |
 | `cclau ls` | List all profiles |

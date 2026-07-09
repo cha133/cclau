@@ -228,7 +228,7 @@ async function promptApiKeyEdit(existingToken: string): Promise<string> {
 }
 
 /** Spinner + fetch。失败返 null（失败和空列表在 wizard 里同等对待 → 走纯 text）。 */
-async function loadModels(
+export async function loadModels(
   endpoint: string,
   token: string,
 ): Promise<string[] | null> {
@@ -257,7 +257,7 @@ async function loadModels(
  * fetch 失败 → 直接 p.text 手动输入。`defaultValue` 用作 `initialValue`
  * （如果在 list 里）或 `initialUserInput`（不在 list 里）。
  */
-async function promptModel(
+export async function promptModel(
   message: string,
   models: string[] | null,
   defaultValue?: string,
@@ -313,7 +313,7 @@ async function promptModel(
 }
 
 /** 1m confirm（默认 true）。 */
-async function prompt1m(model: string, defaultValue: boolean): Promise<boolean> {
+export async function prompt1m(model: string, defaultValue: boolean): Promise<boolean> {
   return checkCancel(
     await p.confirm({
       message: `Does model "${model}" support 1M context?`,
