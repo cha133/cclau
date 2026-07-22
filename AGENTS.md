@@ -4,7 +4,7 @@ Project guidance for Codex when working on this repository.
 
 ## What this is
 
-`cclau` is a launcher for [Codex](https://docs.Codex.com/en/docs/Codex) that lets you switch between API endpoints (DeepSeek, MiniMax, Moonshot Kimi, OpenCode Go, custom) via named profiles. A local sidecar server kicks in automatically when the active profile's mode requires protocol translation or request/response patching.
+`cclau` is a launcher for [Claude Code](https://docs.claude.com/en/docs/claude-code) that lets you switch between API endpoints (DeepSeek, MiniMax, Moonshot Kimi, OpenCode Go, custom) via named profiles. A local sidecar server kicks in automatically when the active profile's mode requires protocol translation or request/response patching.
 
 See [README.md](./README.md) for end-user docs (install, usage, configuration).
 
@@ -12,8 +12,9 @@ See [README.md](./README.md) for end-user docs (install, usage, configuration).
 
 ```
 src/
-  cli.ts                 # 5-layer routing + commander subcommand registration
-  commands/              # add, edit, rm, ls, show, default, launch
+  cli.ts                 # Commander subcommand registration + two-lane dispatch
+  routing.ts             # pure management-command vs Claude-launch classifier
+  commands/              # add, cp, edit, rename, rm, ls, show, use, launch
   server/                # sidecar HTTP server + protocol conversion
     index.ts             # Bun.serve, /v1/messages dispatcher
     registry.ts          # model → RouteEntry (always 1 entry per profile)
@@ -24,7 +25,7 @@ src/
   utils/                 # paths, logger (picocolors), names, upstream-url, table
   fuzzy.ts               # profile name fuzzy matching
   port.ts                # findFreePort (default 3133)
-  process.ts             # spawn `Codex --settings <temp.json>` child process
+  process.ts             # spawn `claude --settings <temp.json>` child process
   types.ts               # Profile + Mode + Anthropic/OpenAI protocol types
   config.ts              # TOML CRUD on $XDG_CONFIG_HOME/cclau/config.toml
   settings.ts            # resolveLaunch + writeSettingsFile (writes temp file)
@@ -67,19 +68,21 @@ These are load-bearing — do not change without updating tests in lockstep.
    - `rectify` (anthropic + rectifier hooks via sidecar; `ANTHROPIC_BASE_URL = http://127.0.0.1:<port>`)
    - `openai` (openai chat → anthropic conversion via sidecar; `ANTHROPIC_BASE_URL = http://127.0.0.1:<port>`)
 
-2. **Settings file (4 model env vars all equal)** — `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_MODEL` + `ANTHROPIC_DEFAULT_OPUS_MODEL` + `ANTHROPIC_DEFAULT_SONNET_MODEL` + `ANTHROPIC_DEFAULT_HAIKU_MODEL`. The last four all hold the same `apply1m(profile.model, profile.supports1m)` value. The temp file is written via `writeSettingsFile` to `$INVOCATION_DIR/invocation-<uuid>.json`; it is `Codex --settings <path>`'d, never `~/.Codex/settings.json`. Cleanup runs on signal/exit.
+2. **Settings file (4 model env vars all equal)** — `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_MODEL` + `ANTHROPIC_DEFAULT_OPUS_MODEL` + `ANTHROPIC_DEFAULT_SONNET_MODEL` + `ANTHROPIC_DEFAULT_HAIKU_MODEL`. The last four all hold the same `apply1m(profile.model, profile.supports1m)` value. The temp file is written via `writeSettingsFile` to `$INVOCATION_DIR/invocation-<uuid>.json`; it is `claude --settings <path>`'d, never `~/.claude/settings.json`. Cleanup runs on signal/exit.
 
-3. **Settings deep-merge** — Codex deep-merges `--settings` over global settings (lodash `mergeWith` → source order user → project → local → flag → policy). Our temp file only writes `env`: all other fields merge through unchanged. Don't write fields here expecting to "reset" global state; deep merge just keeps it. To override, set the field explicitly in `env` (or the nested object).
+3. **Settings deep-merge** — Claude Code deep-merges `--settings` over global settings (lodash `mergeWith` → source order user → project → local → flag → policy). Our temp file only writes `env`: all other fields merge through unchanged. Don't write fields here expecting to "reset" global state; deep merge just keeps it. To override, set the field explicitly in `env` (or the nested object).
 
-4. **Sidecar registry key** — `strip1m(profile.model)`. Codex's `normalizeModelStringForAPI` strips `[1m]` before sending, so the sidecar receives the already-stripped name. The registry (always 1 entry per launch) must match on that form. No provider prefix (single profile owns its own endpoint).
+4. **Sidecar registry key** — `strip1m(profile.model)`. Claude Code's `normalizeModelStringForAPI` strips `[1m]` before sending, so the sidecar receives the already-stripped name. The registry (always 1 entry per launch) must match on that form. No provider prefix (single profile owns its own endpoint).
 
-5. **Rectifier mounts only in rectify mode** — `entry.rectifier` is `undefined` for `direct` and `openai`. `__CCLAU_BEARER_APIKEY__` is a sentinel in TOML that the runtime substitutes with `profile.apiKey` at request time — keeps secrets out of disk.
+5. **Rectifiers are mode-specific** — `direct` never mounts a rectifier. `rectify` resolves `profile.rectifier` through the Anthropic preset table; `openai` resolves it through the OpenAI preset table. The same opaque name may select different hooks by mode. `__CCLAU_BEARER_APIKEY__` is a sentinel in preset rules that the runtime substitutes with `profile.apiKey` at request time — keeps secrets out of disk.
 
 6. **Global default key** — TOML has an optional top-level `default = "<profile-name>"` key referencing one profile name. Single source of truth, so multi-default cannot occur. `cclau use <name>` writes this key (fuzzy-resolves, validates the profile exists to prevent dangling writes). `cclau use` (no arg) prints the active name. If the referenced profile is removed, the alphabetically-first remaining profile is auto-promoted; if none remain, the `default` key is left stale (not cleared) so the next `cclau add` can overwrite it via the lazy-resolve trigger.
 
 7. **First add becomes default** — `cclau add` sets the top-level `default` to the new profile IFF `getDefaultProfile()` (lazy-resolve) returns undefined. The trigger counts dangling references as unset. Subsequent adds leave the existing global `default` alone. Removing a non-default profile does not change the global `default`.
 
 8. **Legacy config detection** — TOML files containing the old per-profile `default = true` field (pre-global-default schema) are rejected at `loadAppConfig` with a `LegacyConfigError` carrying a copy-paste migration message. No automatic migration; user runs `cclau use <name>` once after hand-deleting the old `default = true` lines.
+
+9. **Two-lane CLI routing** — Commander is the single source of truth for management command names and aliases; never add a parallel hard-coded subcommand allowlist. `classifyRoute` sends registered commands to `program.parseAsync` and sends everything else to the default/named-profile launcher with Claude arguments preserved. Root help/version are intercepted only when used alone. Strip cclau-owned flags before passing the cleaned argv to Commander. Update `tests/routing.test.ts` whenever routing semantics change.
 
 ## Adding a new vendor preset
 
