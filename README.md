@@ -43,13 +43,12 @@ cclau work -c       # launch with claude args (everything after profile name pas
 | `cclau -h` / `cclau --help` | Show cclau help |
 | `cclau -v` / `cclau --version` | Show cclau version |
 
-Routing rules (in priority order):
+Routing has two lanes:
 
-1. `cclau` (no args) → launch the default profile
-2. `cclau -h` / `cclau --help` (as the only argument) → cclau help (intercepts Claude Code's own `-h`)
-3. `cclau -X` (any other flag) → launch the default profile, pass everything after to Claude Code
-4. `cclau <known-subcommand>` → commander subcommand
-5. `cclau <name>` → fuzzy-match a profile, pass everything after to Claude Code
+1. Registered management commands (`add`, `rename`, `use`, etc.) go to Commander.
+2. Everything else launches Claude Code with the default or named profile and preserves its arguments.
+
+As special root forms, `cclau -h` / `--help` and `cclau -v` / `--version` are handled by cclau only when the flag is the sole argument. Flags after a profile name are passed through to Claude Code.
 
 ## Modes
 

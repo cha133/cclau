@@ -1,12 +1,9 @@
 #!/usr/bin/env bun
 // cclau - Claude Code launcher
 //
-// 5-layer routing (see .claude/02-cli-routing.md):
-//   1. no args             → launch default profile
-//   2. -h / --help alone   → cclau help (intercepts cc help)
-//   3. -X                  → launch default + passthrough all argv to claude
-//   4. known subcommand    → commander
-//   5. otherwise           → fuzzy match profile + passthrough remaining args
+// Two-lane routing:
+//   management command → Commander
+//   everything else    → launch default or named profile, preserving Claude argv
 
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
@@ -19,25 +16,7 @@ import { launchCmd, launchDefault } from "./commands/launch.js";
 import { rmCmd } from "./commands/rm.js";
 import { renameCmd } from "./commands/rename.js";
 import { showCmd } from "./commands/show.js";
-
-// commander-known subcommands. Add or remove here only.
-// Final list (see .claude/02-cli-routing.md § rule 4):
-//   add cp edit rename rm remove ls list show use help version
-// Removed: doctor models alias switch profile default (and its subcommand group)
-const KNOWN_SUBCOMMANDS = new Set([
-  "add",
-  "cp",
-  "edit",
-  "rename",
-  "rm",
-  "remove",
-  "ls",
-  "list",
-  "show",
-  "use",
-  "help",
-  "version",
-]);
+import { classifyRoute } from "./routing.js";
 
 const program = new Command();
 
@@ -102,51 +81,23 @@ program
 registerUse(program);
 
 // ============================================================================
-// main routing
+// main routing — Commander owns management command registration; classifyRoute
+// only decides whether argv belongs to Commander or the wrapped Claude process.
 // ============================================================================
 
 async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
+  const route = classifyRoute(program, process.argv.slice(2));
 
-  // Strip cclau-owned flags before routing. Ownership is encoded in the flag
-  // shape itself (long --cclau-* prefix → cclau), so this never collides with
-  // claude code's --debug / -d / etc. Add future cclau-only flags here.
-  const debugIdx = argv.indexOf("--cclau-debug");
-  const debug = debugIdx >= 0;
-  if (debug) argv.splice(debugIdx, 1);
-
-  const firstArg = argv[0];
-
-  // rule 1: no args → launch default
-  if (firstArg === undefined) {
-    await launchDefault([], debug);
-    return;
+  switch (route.kind) {
+    case "commander":
+      await program.parseAsync(route.argv, { from: "user" });
+      return;
+    case "default":
+      await launchDefault(route.claudeArgs, route.debug);
+      return;
+    case "profile":
+      await launchCmd(route.profile, route.claudeArgs, route.debug);
   }
-
-  // rule 2: -h / --help / -v / --version as the only arg → cclau help / version.
-  // Intercepts these so users see cclau's own help/version (use `cc -h` / `cc -v`
-  // for Claude Code's). Add more here if cclau needs its own flag that collides
-  // with claude's.
-  const INTERCEPT_FLAGS = new Set(["-h", "--help", "-v", "--version"]);
-  if (INTERCEPT_FLAGS.has(firstArg) && argv.length === 1) {
-    program.parse(process.argv);
-    return;
-  }
-
-  // rule 3: -X → launch default + passthrough
-  if (firstArg.startsWith("-")) {
-    await launchDefault(argv, debug);
-    return;
-  }
-
-  // rule 4: known subcommand → commander
-  if (KNOWN_SUBCOMMANDS.has(firstArg)) {
-    program.parse(process.argv);
-    return;
-  }
-
-  // rule 5: fuzzy match profile + passthrough remaining args
-  await launchCmd(firstArg, argv.slice(1), debug);
 }
 
 main().catch((err) => {
