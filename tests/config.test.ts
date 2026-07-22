@@ -24,6 +24,7 @@ import {
   listProfileNames,
   clearDefault,
   removeProfile,
+  renameProfile,
   setDefault,
   upsertProfile,
 } from "../src/config.js";
@@ -129,6 +130,28 @@ describe("config CRUD (CCLAU_CONFIG isolated)", () => {
     expect(getProfile("p1")?.supports1m).toBe(true);
     await upsertProfile(makeProfile("p1", { supports1m: false }));
     expect(getProfile("p1")?.supports1m).toBe(false);
+  });
+
+  test.serial("renameProfile moves the record and updates the default atomically", async () => {
+    await upsertProfile(makeProfile("old-name", { createdAt: 123, updatedAt: 456 }));
+    await setDefault("old-name");
+
+    expect(await renameProfile("old-name", "new-name", 999)).toBe(true);
+    expect(getProfile("old-name")).toBeUndefined();
+    expect(getProfile("new-name")).toMatchObject({
+      name: "new-name",
+      createdAt: 123,
+      updatedAt: 999,
+    });
+    expect(getDefaultName()).toBe("new-name");
+  });
+
+  test.serial("renameProfile rejects collisions without changing config", async () => {
+    await upsertProfile(makeProfile("alpha"));
+    await upsertProfile(makeProfile("beta"));
+
+    expect(renameProfile("alpha", "beta")).rejects.toThrow(/already exists/);
+    expect(listProfileNames()).toEqual(["alpha", "beta"]);
   });
 });
 

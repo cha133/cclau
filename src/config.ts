@@ -127,6 +127,29 @@ export async function removeProfile(name: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Rename a profile in one config write. The profile payload is preserved,
+ * except for updatedAt, and the global default reference follows the rename.
+ */
+export async function renameProfile(
+  oldName: string,
+  newName: string,
+  updatedAt = Date.now(),
+): Promise<boolean> {
+  const cfg = loadAppConfig();
+  const stored = cfg.profiles[oldName];
+  if (!stored) return false;
+  if (cfg.profiles[newName]) {
+    throw new Error(`profile "${newName}" already exists`);
+  }
+
+  cfg.profiles[newName] = { ...stored, updatedAt };
+  delete cfg.profiles[oldName];
+  if (cfg.default === oldName) cfg.default = newName;
+  await saveAppConfig(cfg);
+  return true;
+}
+
 export function listProfiles(): Profile[] {
   const cfg = loadAppConfig();
   const profiles: Profile[] = Object.entries(cfg.profiles).map(([name, stored]) =>

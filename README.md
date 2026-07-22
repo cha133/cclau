@@ -34,6 +34,7 @@ cclau work -c       # launch with claude args (everything after profile name pas
 | `cclau add` | Interactively add a profile |
 | `cclau cp <src> <new_name>` | Clone a profile, pick model/1m, and make the clone active |
 | `cclau edit <name>` | Edit a profile (endpoint / key / mode / model / 1m) |
+| `cclau rename <name> <new_name>` | Rename a profile (preserves the active/default selection) |
 | `cclau rm <name>` | Remove a profile |
 | `cclau ls` | List all profiles |
 | `cclau show <name>` | Show profile details |
