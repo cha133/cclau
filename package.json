@@ -39,9 +39,9 @@
   "homepage": "https://github.com/cha133/cclau#readme",
   "dependencies": {
     "@clack/prompts": "^1.0.0",
-    "commander": "^12.0.0",
-    "smol-toml": "^1.6.1",
-    "picocolors": "^1.0.0"
+    "commander": "^15.0.0",
+    "picocolors": "^1.0.0",
+    "smol-toml": "^1.6.1"
   },
   "devDependencies": {
     "@types/bun": "latest",
